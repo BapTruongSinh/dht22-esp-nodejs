@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IoT Dashboard - DHT22 & Motor Control</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      gap: 20px;
+    }
+
+    h1 { font-size: 1.5rem; color: #7dd3fc; letter-spacing: 0.05em; }
+
+    /* ── Status Bar ── */
+    #status-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      padding: 10px 20px;
+      font-size: 0.9rem;
+    }
+
+    .dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #ef4444;
+      transition: background 0.3s;
+    }
+    .dot.connected { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+
+    /* ── Cards ── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      width: 100%;
+      max-width: 720px;
+    }
+
+    .card {
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid #334155;
+      border-radius: 16px;
+      padding: 24px;
+      text-align: center;
+      backdrop-filter: blur(8px);
+    }
+
+    .card-label {
+      font-size: 0.8rem;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 8px;
+    }
+
+    .card-value {
+      font-size: 2.4rem;
+      font-weight: 700;
+      color: #7dd3fc;
+    }
+
+    .card-unit {
+      font-size: 1rem;
+      color: #64748b;
+      margin-left: 4px;
+    }
+
+    /* ── Motor Control ── */
+    #motor-card { max-width: 720px; width: 100%; }
+
+    .motor-state {
+      font-size: 1.4rem;
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+    .motor-state.on  { color: #22c55e; }
+    .motor-state.off { color: #ef4444; }
+
+    .btn {
+      display: inline-block;
+      padding: 12px 36px;
+      border: none;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      margin: 6px;
+    }
+    .btn-toggle {
+      background: linear-gradient(135deg, #3b82f6, #7c3aed);
+      color: #fff;
+    }
+    .btn-toggle:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(99,102,241,0.4); }
+    .btn-on  { background: #16a34a; color: #fff; }
+    .btn-off { background: #dc2626; color: #fff; }
+    .btn-on:hover  { background: #15803d; }
+    .btn-off:hover { background: #b91c1c; }
+
+    /* ── Log ── */
+    #log-box {
+      width: 100%;
+      max-width: 720px;
+      background: #0f172a;
+      border: 1px solid #1e3a5f;
+      border-radius: 12px;
+      padding: 12px;
+      height: 160px;
+      overflow-y: auto;
+      font-family: 'Cascadia Code', 'Consolas', monospace;
+      font-size: 0.78rem;
+      color: #94a3b8;
+    }
+
+    #log-box p { padding: 2px 0; border-bottom: 1px solid #1e293b; }
+    #log-box p:last-child { border-bottom: none; }
+    .log-info  { color: #7dd3fc; }
+    .log-warn  { color: #fbbf24; }
+    .log-ok    { color: #4ade80; }
+  </style>
+</head>
+<body>
+  <h1>IoT Dashboard - DHT22 & Motor Control</h1>
+
+  <!-- Trang thai ket noi -->
+  <div id="status-bar">
+    <div class="dot" id="ws-dot"></div>
+    <span id="ws-status">Dang ket noi WebSocket...</span>
+    &nbsp;|&nbsp;
+    <div class="dot" id="esp-dot"></div>
+    <span id="esp-status">ESP chua ket noi</span>
+  </div>
+
+  <!-- Du lieu cam bien -->
+  <div class="grid">
+    <div class="card">
+      <div class="card-label">Nhiet do</div>
+      <div class="card-value" id="temp-val">--<span class="card-unit">C</span></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Do am</div>
+      <div class="card-value" id="humid-val">--<span class="card-unit">%</span></div>
+    </div>
+  </div>
+
+  <!-- Dieu khien dong co -->
+  <div class="card" id="motor-card">
+    <div class="card-label">Trang thai Dong co</div>
+    <div class="motor-state off" id="motor-state-text">OFF</div>
+    <button class="btn btn-toggle" id="btn-toggle" onclick="toggleMotor()">Toggle</button>
+    <button class="btn btn-on"     id="btn-on"     onclick="setMotor('ON')">Bat</button>
+    <button class="btn btn-off"    id="btn-off"    onclick="setMotor('OFF')">Tat</button>
+  </div>
+
+  <!-- Log -->
+  <div id="log-box"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
