@@ -1,23 +1,4 @@
 // server.js – WebSocket server IoT DHT22
-//
-// Kết nối:
-//   ws://HOST:3000/esp  → ESP32
-//   ws://HOST:3000/fe   → Frontend (nhiều client)
-//   http://HOST:3000    → Web UI tĩnh (public/)
-//
-// FE -> Server:
-//   { type: "fan",       state: "ON"|"OFF" }   – bật/tắt quạt (MANUAL only)
-//   { type: "buzzer_off" }                      – tắt còi      (MANUAL only)
-//   { type: "mode",      value: "AUTO"|"MANUAL" } – chuyển chế độ
-//
-// Server -> FE:
-//   { type: "sensor_update", temp, humi, fan, buzzer, mode, alarm, error, app_state, system_state, timestamp }
-//   { type: "fan_state",    state: "ON"|"OFF" }
-//   { type: "buzzer_state", state: "ON"|"OFF" }
-//   { type: "mode_state",   mode:  "AUTO"|"MANUAL" }
-//   { type: "esp_status",   connected: bool }
-//   { type: "error",        reason: "AUTO_MODE" }  – khi lệnh bị chặn
-
 const http = require('http');
 const fs   = require('fs');
 const path = require('path');
@@ -68,17 +49,17 @@ wss.on('connection', (ws, req) => {
       if (!result) return;
 
       if (result.type === 'sensor') {
-        // Broadcast dữ liệu cảm biến + trạng thái mode/buzzer/fan
+        // Broadcast nguyên bản dữ liệu cảm biến (tên biến, giá trị y hệt payload từ ESP)
         broadcast({ type: 'sensor_update', ...result.data });
-        broadcast({ type: 'mode_state',   mode:  result.data.mode });
-        broadcast({ type: 'fan_state',    state: result.data.fan    ? 'ON' : 'OFF' });
-        broadcast({ type: 'buzzer_state', state: result.data.buzzer ? 'ON' : 'OFF' }); 
+      } else if (result.type === 'event') {
+        broadcast({ type: 'event', event: result.event });
       }
     });
 
     ws.on('close', () => {
       esp.unregisterESP();
       broadcast({ type: 'esp_status', connected: false });
+      broadcast({ type: 'offline', message: 'ESP đã ngắt kết nối (offline)' });
     });
 
     ws.on('error', err => console.error('[ESP]', err.message));
@@ -90,11 +71,7 @@ wss.on('connection', (ws, req) => {
     feClients.add(ws);
     console.log(`[FE] Kết nối (${feClients.size} client)`);
 
-    // Gửi toàn bộ trạng thái hiện tại ngay khi FE kết nối
-    ws.send(JSON.stringify({ type: 'esp_status',   connected: esp.isConnected() }));
-    ws.send(JSON.stringify({ type: 'mode_state',   mode:  esp.getMode() }));
-    ws.send(JSON.stringify({ type: 'fan_state',    state: esp.getFanState() }));
-    ws.send(JSON.stringify({ type: 'buzzer_state', state: esp.getBuzzerState() }));
+    ws.send(JSON.stringify({ type: 'esp_status', connected: esp.isConnected() }));
     const last = esp.getLastData();
     if (last) ws.send(JSON.stringify({ type: 'sensor_update', ...last }));
 
@@ -105,23 +82,16 @@ wss.on('connection', (ws, req) => {
         // ── Chuyển mode ───────────────────────────────────────────────────────
         if (msg.type === 'mode') {
           esp.setMode(msg.value);
-          broadcast({ type: 'mode_state', mode: msg.value });
 
         // ── Điều khiển quạt ───────────────────────────────────────────────────
         } else if (msg.type === 'fan') {
           const ok = esp.setFan(msg.state);
-          if (ok) {
-            broadcast({ type: 'fan_state', state: esp.getFanState() });
-          } else {
-            ws.send(JSON.stringify({ type: 'error', reason: 'AUTO_MODE' }));
-          }
+          if (!ok) ws.send(JSON.stringify({ type: 'error', reason: 'AUTO_MODE' }));
 
         // ── Tắt còi ───────────────────────────────────────────────────────────
         } else if (msg.type === 'buzzer_off') {
           const ok = esp.buzzerOff();
-          if (!ok) {
-            ws.send(JSON.stringify({ type: 'error', reason: 'AUTO_MODE' }));
-          }
+          if (!ok) ws.send(JSON.stringify({ type: 'error', reason: 'AUTO_MODE' }));
 
         } else {
           console.warn('[FE] Lệnh không xác định:', msg.type);

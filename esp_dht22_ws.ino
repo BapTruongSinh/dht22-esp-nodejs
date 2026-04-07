@@ -18,105 +18,146 @@ const int port = 3000;
 #define DHTTYPE DHT22
 
 // ================= HARDWARE =================
-#define RELAY_PIN   18
-#define BUZZER_PIN  19
-#define BUZZER_ON   LOW
-#define BUZZER_OFF  HIGH
-
-// ================= BUTTON PINS =================
-#define BTN_MODE_PIN   25   // Chuyển AUTO <-> MANUAL
-#define BTN_FAN_PIN    26   // Bật/Tắt quạt (chỉ hoạt động ở MANUAL)
-#define BTN_BUZZER_PIN 27   // Tắt còi (chỉ hoạt động ở MANUAL)
+#define RELAY_PIN 18
+#define BUZZER_PIN 19
+#define BUZZER_ON LOW
+#define BUZZER_OFF HIGH
+#define BTN_FAN_PIN 25
+#define BTN_BUZZER_PIN 26
+#define BTN_MODE_PIN 27
+#define BUTTON_DEBOUNCE_MS 150
 
 // ================= LIMIT =================
 #define TEMP_LIMIT 28
 #define HUMI_LIMIT 85
 #define TEMP_ALARM 32
 #define HUMI_ALARM 95
+#define APP_STATE_CONFIRM_MS 5000
 
 DHT dht(DHTPIN, DHTTYPE);
-LiquidCrystal_I2C lcd(0x27, 16, 2);
+LiquidCrystal_I2C lcd(0x27,16,2);
 
 // ================= STATE =================
-enum SystemState { SYS_INIT, SYS_WIFI, SYS_WS, SYS_RUNNING, SYS_ERROR };
-enum AppState    { NORMAL, WARNING, ALARM, ERROR_STATE };
+enum SystemState { SYS_INIT, SYS_WIFI, SYS_WS, SYS_RUNNING, SYS_WIFI_LOST, SYS_WS_LOST };
+enum AppState { NORMAL, WARNING, ALARM, ERROR_STATE };
+enum ControlMode { MODE_AUTO, MODE_MANUAL };
+enum FanState { FAN_OFF, FAN_ON };
+enum BuzzerState { BUZZER_IDLE, BUZZER_STEADY_ON, BUZZER_BLINK };
 
 SystemState sysState = SYS_INIT;
-AppState    appState = NORMAL;
-AppState    lastState = NORMAL;
+AppState appState = NORMAL;
+AppState lastState = NORMAL;
+AppState pendingAppState = NORMAL;
+ControlMode controlMode = MODE_AUTO;
+ControlMode lastControlMode = MODE_AUTO;
+FanState autoFanState = FAN_OFF;
+FanState manualFanState = FAN_OFF;
+FanState fanState = FAN_OFF;
+BuzzerState autoBuzzerState = BUZZER_IDLE;
+BuzzerState buzzerState = BUZZER_IDLE;
 
 // ================= DATA =================
 float temp = 0, humi = 0;
 bool errorSensor = false;
-int  errorSensorCount = 0;
+int errorSensorCount = 0;
 
 // ================= CONTROL =================
-bool isAutoMode = true;    // true = AUTO, false = MANUAL
-bool fanOn      = false;   // trạng thái quạt
-bool buzzerOn   = false;   // trạng thái còi
-
-unsigned long buzzer_time = 0;   // dùng để nhấp nháy còi ở AUTO/ALARM
-
-// ================= BUTTON DEBOUNCE =================
-unsigned long lastBtnMode   = 0;
-unsigned long lastBtnFan    = 0;
-unsigned long lastBtnBuzzer = 0;
-#define DEBOUNCE_MS 200
+bool buzzerOn = false;
+unsigned long buzzer_time = 0;
 
 // ================= TIMER =================
-unsigned long lastSensor       = 0;
-unsigned long lastLCD          = 0;
-unsigned long lastReconnectWiFi= 0;
-unsigned long lastReconnectWS  = 0;
-unsigned long lastSend         = 0;
-unsigned long lastHeartbeat    = 0;
+unsigned long lastSensor = 0;
+unsigned long lastLCD = 0;
+unsigned long lastReconnectWiFi = 0;
+unsigned long lastReconnectWS = 0;
+unsigned long lastSend = 0;
+unsigned long appStateSince = 0;
+unsigned long lastFanButtonTime = 0;
+unsigned long lastBuzzerButtonTime = 0;
+unsigned long lastModeButtonTime = 0;
+bool lastFanButtonLevel = HIGH;
+bool lastBuzzerButtonLevel = HIGH;
+bool lastModeButtonLevel = HIGH;
+bool statusDirty = false;
+bool manualBuzzerLatchedOff = false;
 
 // ================= WS =================
 bool wsConnected = false;
 
-// ================= QUEUE =================
-struct Message {
-  int id;
-  String data;
-};
-
-#define MAX_QUEUE 5
-Message queue[MAX_QUEUE];
-int queueSize = 0;
-
-int currentMsgId = 0;
-bool waitingAck  = false;
-unsigned long sendTime = 0;
-
 // ================= LOG =================
 const char* appStateName(AppState state) {
-  switch (state) {
-    case NORMAL:      return "NORMAL";
-    case WARNING:     return "WARNING";
-    case ALARM:       return "ALARM";
+  switch(state) {
+    case NORMAL: return "NORMAL";
+    case WARNING: return "WARNING";
+    case ALARM: return "ALARM";
     case ERROR_STATE: return "ERROR";
   }
+
+  return "UNKNOWN";
+}
+
+const char* controlModeName(ControlMode mode) {
+  switch(mode) {
+    case MODE_AUTO: return "AUTO";
+    case MODE_MANUAL: return "MANUAL";
+  }
+
+  return "UNKNOWN";
+}
+
+const char* fanStateName(FanState state) {
+  switch(state) {
+    case FAN_OFF: return "OFF";
+    case FAN_ON: return "ON";
+  }
+
+  return "UNKNOWN";
+}
+
+const char* buzzerStateName(BuzzerState state) {
+  switch(state) {
+    case BUZZER_IDLE: return "OFF";
+    case BUZZER_STEADY_ON: return "ON";
+    case BUZZER_BLINK: return "BLINK";
+  }
+
   return "UNKNOWN";
 }
 
 const char* systemStateName(SystemState state) {
-  switch (state) {
-    case SYS_INIT:    return "INIT";
-    case SYS_WIFI:    return "WAIT_WIFI";
-    case SYS_WS:      return "WAIT_WS";
+  switch(state) {
+    case SYS_INIT: return "INIT";
+    case SYS_WIFI: return "WAIT_WIFI";
+    case SYS_WS: return "WAIT_WS";
     case SYS_RUNNING: return "RUNNING";
-    case SYS_ERROR:   return "ERROR";
+    case SYS_WIFI_LOST: return "WIFI_LOST";
+    case SYS_WS_LOST: return "WS_LOST";
   }
+
   return "UNKNOWN";
 }
 
 void logLine(const char* tag, const String& message) {
   Serial.print('[');
   Serial.print(millis());
-  Serial.print(" ms][");
+  Serial.print(" ms]");
+  Serial.print('[');
   Serial.print(tag);
   Serial.print("] ");
   Serial.println(message);
+}
+
+bool buttonPressed(int pin, unsigned long& lastTime, bool& lastLevel) {
+  bool currentLevel = digitalRead(pin);
+  bool pressed = false;
+
+  if(lastLevel == HIGH && currentLevel == LOW && millis() - lastTime > BUTTON_DEBOUNCE_MS) {
+    lastTime = millis();
+    pressed = true;
+  }
+
+  lastLevel = currentLevel;
+  return pressed;
 }
 
 // ================= WIFI =================
@@ -127,96 +168,101 @@ void connectWiFi() {
 
 // ================= SYSTEM STATE =================
 void updateSystemState() {
-  SystemState prev = sysState;
-  switch (sysState) {
-    case SYS_INIT:    sysState = SYS_WIFI;    break;
-    case SYS_WIFI:    if (WiFi.status() == WL_CONNECTED) sysState = SYS_WS;      break;
-    case SYS_WS:      if (wsConnected)                   sysState = SYS_RUNNING;  break;
-    case SYS_RUNNING: if (WiFi.status() != WL_CONNECTED) sysState = SYS_ERROR;   break;
-    case SYS_ERROR:   break;
+  SystemState previousState = sysState;
+
+  switch(sysState) {
+    case SYS_INIT:
+      sysState = SYS_WIFI;
+      break;
+
+    case SYS_WIFI:
+      if(WiFi.status() == WL_CONNECTED)
+        sysState = SYS_WS;
+      break;
+
+    case SYS_WS:
+      if(WiFi.status() != WL_CONNECTED)
+        sysState = SYS_WIFI_LOST;
+      else if(wsConnected)
+        sysState = SYS_RUNNING;
+      break;
+
+    case SYS_RUNNING:
+      if(WiFi.status() != WL_CONNECTED)
+        sysState = SYS_WIFI_LOST;
+      else if(!wsConnected)
+        sysState = SYS_WS_LOST;
+      break;
+
+    case SYS_WIFI_LOST:
+      if(WiFi.status() == WL_CONNECTED)
+        sysState = SYS_WS;
+      break;
+
+    case SYS_WS_LOST:
+      if(WiFi.status() != WL_CONNECTED)
+        sysState = SYS_WIFI_LOST;
+      else if(wsConnected)
+        sysState = SYS_RUNNING;
+      break;
   }
-  if (sysState != prev)
-    logLine("SYSTEM", String(systemStateName(prev)) + " -> " + systemStateName(sysState));
+
+  if(sysState != previousState) {
+    logLine("SYSTEM", String(systemStateName(previousState)) + " -> " + systemStateName(sysState));
+  }
 }
 
+// ================= HANDLE SYSTEM =================
 void handleSystemState() {
-  switch (sysState) {
+
+  switch(sysState) {
+
     case SYS_WIFI:
-      if (WiFi.status() != WL_CONNECTED && millis() - lastReconnectWiFi > 5000) {
-        lastReconnectWiFi = millis();
-        connectWiFi();
+      if (WiFi.status() != WL_CONNECTED) {
+        if (millis() - lastReconnectWiFi > 5000) {
+          lastReconnectWiFi = millis();
+          connectWiFi();
+        }
       }
       break;
+
     case SYS_WS:
-      if (!wsConnected && millis() - lastReconnectWS > 5000) {
-        lastReconnectWS = millis();
-        logLine("WS", "Opening socket to " + String(host) + ":" + String(port));
-        webSocket.begin(host, port, "/");
-        webSocket.onEvent(webSocketEvent);
+      if (!wsConnected) {
+        if (millis() - lastReconnectWS > 5000) {
+          lastReconnectWS = millis();
+          logLine("WS", "Opening socket to " + String(host) + ":" + String(port));
+          webSocket.begin(host, port, "/esp");
+          webSocket.onEvent(webSocketEvent);
+        }
       }
       break;
-    case SYS_ERROR:
+
+    case SYS_WIFI_LOST:
       if (millis() - lastReconnectWiFi > 5000) {
         lastReconnectWiFi = millis();
         connectWiFi();
       }
       break;
-    default: break;
-  }
-}
 
-// ================= APPLY RELAY & BUZZER =================
-void applyFan() {
-  digitalWrite(RELAY_PIN, fanOn ? HIGH : LOW);
-}
-
-void applyBuzzer() {
-  digitalWrite(BUZZER_PIN, buzzerOn ? BUZZER_ON : BUZZER_OFF);
-}
-
-// ================= WS COMMAND HANDLER =================
-void handleCommand(const String& raw) {
-  // Tìm key "mode"
-  if (raw.indexOf("\"mode\"") >= 0) {
-    bool newAuto = raw.indexOf("\"AUTO\"") >= 0;
-    if (newAuto != isAutoMode) {
-      isAutoMode = newAuto;
-      // Giữ nguyên trạng thái quạt và còi khi đổi mode
-      logLine("MODE", isAutoMode ? "Switched to AUTO" : "Switched to MANUAL");
-    }
-    return;
-  }
-
-  // Lệnh quạt — chỉ chấp nhận ở MANUAL
-  if (raw.indexOf("\"fan\"") >= 0) {
-    if (isAutoMode) {
-      logLine("CMD", "Ignored fan command (AUTO mode)");
-      return;
-    }
-    fanOn = raw.indexOf("\"ON\"") >= 0;
-    applyFan();
-    logLine("CMD", fanOn ? "Fan ON (manual cmd)" : "Fan OFF (manual cmd)");
-    return;
-  }
-
-  // Lệnh tắt còi — chỉ chấp nhận ở MANUAL
-  if (raw.indexOf("\"buzzer\"") >= 0 && raw.indexOf("\"OFF\"") >= 0) {
-    if (isAutoMode) {
-      logLine("CMD", "Ignored buzzer_off command (AUTO mode)");
-      return;
-    }
-    buzzerOn = false;
-    applyBuzzer();
-    logLine("CMD", "Buzzer OFF (manual cmd)");
-    return;
+    case SYS_WS_LOST:
+      if (!wsConnected) {
+        if (millis() - lastReconnectWS > 5000) {
+          lastReconnectWS = millis();
+          logLine("WS", "Reopening socket to " + String(host) + ":" + String(port));
+          webSocket.begin(host, port, "/esp");
+          webSocket.onEvent(webSocketEvent);
+        }
+      }
+      break;
   }
 }
 
 // ================= WS EVENT =================
-void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
-  switch (type) {
+void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
+
+  switch(type) {
     case WStype_CONNECTED:
-      logLine("WS", "Connected to " + String(host) + ":" + String(port));
+      logLine("WS", "Connected to " + String(host) + ":" + String(port) + String("/esp"));
       wsConnected = true;
       break;
 
@@ -227,19 +273,9 @@ void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
 
     case WStype_TEXT: {
       String msg = String((char*)payload);
+
       logLine("WS RX", msg);
-
-      // ACK từ server
-      if ((msg == "ACK" || msg.startsWith("{\"ack\":")) && waitingAck) {
-        waitingAck = false;
-        int ackedId = queue[0].id;
-        removeQueue();
-        logLine("ACK", "id=" + String(ackedId) + ", pending=" + String(queueSize));
-        break;
-      }
-
-      // Lệnh điều khiển từ BE
-      handleCommand(msg);
+      handleWsCommand(msg);
       break;
     }
   }
@@ -258,7 +294,7 @@ void readSensor() {
 
   if (isnan(t) || isnan(h)) {
     errorSensorCount++;
-    if (errorSensorCount >= 5) errorSensor = true;
+    if(errorSensorCount >= 5) errorSensor = true;
     logLine("SENSOR", "Read failed, retryCount=" + String(errorSensorCount));
     return;
   }
@@ -267,168 +303,256 @@ void readSensor() {
   humi = h;
   errorSensor = false;
   errorSensorCount = 0;
+
   logLine("SENSOR", "temp=" + String(temp, 1) + "C, humi=" + String(humi, 1) + "%");
 }
 
 // ================= APP STATE =================
+AppState getRawAppState() {
+  if(errorSensor) return ERROR_STATE;
+  if(temp > TEMP_ALARM || humi > HUMI_ALARM) return ALARM;
+  if(temp > TEMP_LIMIT || humi > HUMI_LIMIT) return WARNING;
+  return NORMAL;
+}
+
 void updateAppState() {
-  if (errorSensor)                            appState = ERROR_STATE;
-  else if (temp > TEMP_ALARM || humi > HUMI_ALARM) appState = ALARM;
-  else if (temp > TEMP_LIMIT || humi > HUMI_LIMIT) appState = WARNING;
-  else                                         appState = NORMAL;
-}
+  AppState rawState = getRawAppState();
 
-// ================= CONTROL LOGIC =================
-void handleAppState() {
-  if (isAutoMode) {
-    // ── AUTO: ESP tự điều khiển theo appState ──
-    switch (appState) {
-      case NORMAL:
-        fanOn    = false;
-        buzzerOn = false;
-        applyFan();
-        applyBuzzer();
-        break;
-
-      case WARNING:
-        fanOn    = true;
-        buzzerOn = false;
-        applyFan();
-        applyBuzzer();
-        break;
-
-      case ALARM:
-        fanOn = true;
-        applyFan();
-        // Nhấp nháy còi mỗi 500ms
-        if (millis() - buzzer_time > 500) {
-          buzzer_time = millis();
-          buzzerOn = !buzzerOn;
-          applyBuzzer();
-        }
-        break;
-
-      case ERROR_STATE:
-        fanOn    = true;
-        buzzerOn = true;
-        applyFan();
-        applyBuzzer();
-        break;
-    }
-  }
-  // ── MANUAL: không tự điều khiển, chỉ giữ trạng thái hiện tại ──
-  // (quạt và còi được điều khiển bởi nút vật lý hoặc lệnh từ BE)
-}
-
-// ================= BUTTONS =================
-void handleButtons() {
-  unsigned long now = millis();
-
-  // Nút MODE — hoạt động ở cả 2 chế độ
-  if (digitalRead(BTN_MODE_PIN) == LOW && now - lastBtnMode > DEBOUNCE_MS) {
-    lastBtnMode = now;
-    isAutoMode  = !isAutoMode;
-    // Giữ nguyên trạng thái quạt và còi khi đổi mode
-    logLine("BTN", isAutoMode ? "Mode -> AUTO" : "Mode -> MANUAL");
-  }
-
-  // Nút QUẠT — chỉ hoạt động ở MANUAL
-  if (digitalRead(BTN_FAN_PIN) == LOW && now - lastBtnFan > DEBOUNCE_MS) {
-    lastBtnFan = now;
-    if (!isAutoMode) {
-      fanOn = !fanOn;
-      applyFan();
-      logLine("BTN", fanOn ? "Fan toggled ON" : "Fan toggled OFF");
-    } else {
-      logLine("BTN", "Fan button ignored (AUTO mode)");
-    }
-  }
-
-  // Nút TẮT CÒI — chỉ hoạt động ở MANUAL (chỉ tắt, không bật)
-  if (digitalRead(BTN_BUZZER_PIN) == LOW && now - lastBtnBuzzer > DEBOUNCE_MS) {
-    lastBtnBuzzer = now;
-    if (!isAutoMode) {
-      if (buzzerOn) {
-        buzzerOn = false;
-        applyBuzzer();
-        logLine("BTN", "Buzzer OFF");
-      }
-    } else {
-      logLine("BTN", "Buzzer button ignored (AUTO mode)");
-    }
-  }
-}
-
-// ================= QUEUE =================
-void pushEvent(String event) {
-  if (queueSize >= MAX_QUEUE) {
-    logLine("QUEUE", "Drop event=" + event + " (queue full)");
+  if(rawState == appState) {
+    pendingAppState = appState;
+    appStateSince = 0;
     return;
   }
-  String data = "{\"event\":\"" + event + "\"}";
-  queue[queueSize].id   = currentMsgId++;
-  queue[queueSize].data = data;
-  queueSize++;
-  logLine("QUEUE", "Push id=" + String(queue[queueSize - 1].id) + ", size=" + String(queueSize));
-}
 
-void removeQueue() {
-  if (queueSize <= 0) return;
-  for (int i = 1; i < queueSize; i++) queue[i - 1] = queue[i];
-  queueSize--;
-  logLine("QUEUE", "Pop success, pending=" + String(queueSize));
-}
+  if(rawState != pendingAppState) {
+    pendingAppState = rawState;
+    appStateSince = millis();
+    logLine("STATE WAIT", String(appStateName(appState)) + " -> " + appStateName(rawState) + " pending");
+    return;
+  }
 
-void sendMessage(Message msg) {
-  if (!wsConnected) return;
-  String packet = "{\"id\":" + String(msg.id) + ",\"data\":" + msg.data + "}";
-  webSocket.sendTXT(packet);
-  logLine("WS TX", "id=" + String(msg.id) + ", payload=" + packet);
-  waitingAck = true;
-  sendTime   = millis();
-}
-
-void processQueue() {
-  if (queueSize <= 0 || waitingAck) return;
-  sendMessage(queue[0]);
-}
-
-void checkTimeout() {
-  if (queueSize <= 0) return;
-  if (waitingAck && millis() - sendTime > 3000) {
-    logLine("RESEND", "Timeout id=" + String(queue[0].id) + ", retrying");
-    sendMessage(queue[0]);
+  if(appStateSince != 0 && millis() - appStateSince >= APP_STATE_CONFIRM_MS) {
+    appState = pendingAppState;
+    appStateSince = 0;
   }
 }
 
-// ================= REALTIME =================
-void sendRealtime() {
-  if (!wsConnected || millis() - lastSend <= 3000) return;
+// ================= CONTROL =================
+void updateAutoOutputState() {
+  switch(appState) {
+    case NORMAL:
+      autoFanState = FAN_OFF;
+      autoBuzzerState = BUZZER_IDLE;
+      break;
+
+    case WARNING:
+      autoFanState = FAN_ON;
+      autoBuzzerState = BUZZER_IDLE;
+      break;
+
+    case ALARM:
+      autoFanState = FAN_ON;
+      autoBuzzerState = BUZZER_BLINK;
+      break;
+
+    case ERROR_STATE:
+      autoFanState = FAN_ON;
+      autoBuzzerState = BUZZER_STEADY_ON;
+      break;
+  }
+}
+
+void switchToManual() {
+  controlMode = MODE_MANUAL;
+  manualFanState = fanState;
+  manualBuzzerLatchedOff = (buzzerState == BUZZER_IDLE);
+}
+
+void switchToAuto() {
+  controlMode = MODE_AUTO;
+  manualBuzzerLatchedOff = false;
+}
+
+void resolveOutputState() {
+  if(controlMode == MODE_MANUAL) {
+    if(manualBuzzerLatchedOff) {
+      buzzerState = BUZZER_IDLE;
+    } else {
+      buzzerState = autoBuzzerState;
+      if(buzzerState == BUZZER_IDLE) {
+        manualBuzzerLatchedOff = true;
+      }
+    }
+  } else {
+    buzzerState = autoBuzzerState;
+  }
+
+  if(controlMode == MODE_AUTO || appState == ERROR_STATE) {
+    fanState = autoFanState;
+  } else {
+    fanState = manualFanState;
+  }
+}
+
+void applyOutputState() {
+
+  if(buzzerState != BUZZER_BLINK) {
+    buzzer_time = 0;
+  }
+
+  digitalWrite(RELAY_PIN, fanState == FAN_ON ? HIGH : LOW);
+
+  switch(buzzerState) {
+    case BUZZER_IDLE:
+      buzzerOn = false;
+      digitalWrite(BUZZER_PIN, BUZZER_OFF);
+      break;
+
+    case BUZZER_STEADY_ON:
+      buzzerOn = true;
+      digitalWrite(BUZZER_PIN, BUZZER_ON);
+      break;
+
+    case BUZZER_BLINK:
+      if(!buzzerOn && buzzer_time == 0) {
+        buzzerOn = true;
+        buzzer_time = millis();
+        digitalWrite(BUZZER_PIN, BUZZER_ON);
+      }
+
+      if(millis() - buzzer_time > 500) {
+        buzzer_time = millis();
+        buzzerOn = !buzzerOn;
+        digitalWrite(BUZZER_PIN, buzzerOn ? BUZZER_ON : BUZZER_OFF);
+      }
+      break;
+  }
+}
+
+void handleControlMode() {
+  if(controlMode != lastControlMode) {
+    logLine("MODE", String(controlModeName(lastControlMode)) + " -> " + controlModeName(controlMode));
+
+    if(controlMode == MODE_MANUAL) {
+      manualFanState = fanState;
+    }
+
+    lastControlMode = controlMode;
+  }
+}
+
+void handleAppState() {
+  updateAutoOutputState();
+  handleControlMode();
+  resolveOutputState();
+  applyOutputState();
+}
+
+// ================= MANUAL CONTROL =================
+void setManualFan(bool on) {
+  manualFanState = on ? FAN_ON : FAN_OFF;
+}
+
+void setManualBuzzer(bool on) {
+  // Manual buzzer control is mute-only.
+  if(!on) {
+    manualBuzzerLatchedOff = true;
+    buzzerState = BUZZER_IDLE;
+  }
+}
+
+void toggleMode() {
+  if(controlMode == MODE_AUTO) switchToManual();
+  else switchToAuto();
+}
+
+void toggleManualFan() {
+  if(controlMode != MODE_MANUAL) return;
+  setManualFan(manualFanState != FAN_ON);
+}
+
+void muteManualBuzzer() {
+  if(controlMode != MODE_MANUAL) return;
+  setManualBuzzer(false);
+}
+
+void handleButtons() {
+  if(buttonPressed(BTN_MODE_PIN, lastModeButtonTime, lastModeButtonLevel)) {
+    toggleMode();
+    statusDirty = true;
+  }
+
+  if(buttonPressed(BTN_FAN_PIN, lastFanButtonTime, lastFanButtonLevel)) {
+    toggleManualFan();
+    statusDirty = true;
+  }
+
+  if(buttonPressed(BTN_BUZZER_PIN, lastBuzzerButtonTime, lastBuzzerButtonLevel)) {
+    muteManualBuzzer();
+    statusDirty = true;
+  }
+}
+
+void handleWsCommand(String msg) {
+  if(msg == "{\"mode\"😕"MANUAL\"}" || msg == "{\"mode\"😕"manual\"}") {
+    switchToManual();
+    statusDirty = true;
+    return;
+  }
+
+  if(msg == "{\"mode\"😕"AUTO\"}" || msg == "{\"mode\"😕"auto\"}") {
+    switchToAuto();
+    statusDirty = true;
+    return;
+  }
+
+  if(msg == "{\"fan\"😕"ON\"}" || msg == "{\"fan\"😕"on\"}") {
+    if(controlMode == MODE_MANUAL) {
+      setManualFan(true);
+      statusDirty = true;
+    }
+    return;
+  }
+
+  if(msg == "{\"fan\"😕"OFF\"}" || msg == "{\"fan\"😕"off\"}") {
+    if(controlMode == MODE_MANUAL) {
+      setManualFan(false);
+      statusDirty = true;
+    }
+    return;
+  }
+
+  if(msg == "{\"buzzer\"😕"OFF\"}" || msg == "{\"buzzer\"😕"off\"}" ||
+     msg == "{\"buzzer\"😕"MUTE\"}" || msg == "{\"buzzer\"😕"mute\"}") {
+    if(controlMode == MODE_MANUAL) {
+      setManualBuzzer(false);
+      statusDirty = true;
+    }
+    return;
+  }
+}
+
+// ================= STATUS SEND =================
+void sendStatus(bool forceSend = false) {
+  if(!wsConnected) return;
+  if(!forceSend && millis() - lastSend <= 3000) return;
+
   lastSend = millis();
 
   String data = "{";
-  data += "\"temp\":"         + String(temp, 1)        + ",";
-  data += "\"humi\":"         + String(humi, 1)        + ",";
-  data += "\"fan\":"          + String(fanOn ? 1 : 0)  + ",";
-  data += "\"buzzer\":"       + String(buzzerOn ? 1 : 0) + ",";
-  data += "\"mode\":\""       + String(isAutoMode ? "AUTO" : "MANUAL") + "\",";
-  data += "\"alarm\":"        + String(appState == ALARM ? 1 : 0) + ",";
-  data += "\"error\":"        + String(appState == ERROR_STATE ? 1 : 0) + ",";
-  data += "\"app_state\":\"" + String(appStateName(appState)) + "\",";
-  data += "\"system_state\":\"" + String(systemStateName(sysState)) + "\"";
+  data += "\"temp\":" + String(temp) + ",";
+  data += "\"humi\":" + String(humi) + ",";
+  data += "\"mode\"😕"" + String(controlModeName(controlMode)) + "\",";
+  data += "\"fan\":" + String(fanState == FAN_ON) + ",";
+  data += "\"buzzer_state\":\"" + String(buzzerState == BUZZER_IDLE ? "off" : "on") + "\",";
+  
+  data += "\"app_state\"😕"" + String(appStateName(appState)) + "\",";
+  data += "\"system_state\"😕"" + String(systemStateName(sysState)) + "\"";
   data += "}";
 
   webSocket.sendTXT(data);
-  logLine("REALTIME", data);
-}
 
-// ================= HEARTBEAT =================
-void heartbeat() {
-  if (millis() - lastHeartbeat > 10000) {
-    lastHeartbeat = millis();
-    webSocket.sendTXT("{\"topic\":\"ping\"}");
-    logLine("PING", "Heartbeat sent");
-  }
+  logLine(forceSend ? "STATE TX" : "STATUS TX", data);
 }
 
 // ================= LCD =================
@@ -436,17 +560,19 @@ char line1[17];
 char line2[17];
 
 void displayLCD() {
+
   snprintf(line1, sizeof(line1), "T:%5.1fC", temp);
   snprintf(line2, sizeof(line2), "H:%5.1f%%", humi);
 
-  lcd.setCursor(0, 0);
+  lcd.setCursor(0,0);
   lcd.print(line1);
 
-  lcd.setCursor(0, 1);
-  switch (appState) {
-    case NORMAL:      lcd.print(line2); lcd.print(isAutoMode ? " AUT" : " MAN"); break;
-    case WARNING:     lcd.print(line2); lcd.print(isAutoMode ? " A!W" : " M!W"); break;
-    case ALARM:       lcd.print(line2); lcd.print(isAutoMode ? " ALM" : " !AL"); break;
+  lcd.setCursor(0,1);
+
+  switch(appState) {
+    case NORMAL: lcd.print(line2); lcd.print(controlMode == MODE_AUTO ? " AN" : " MN"); break;
+    case WARNING: lcd.print(line2); lcd.print(controlMode == MODE_AUTO ? " AW" : " MW"); break;
+    case ALARM: lcd.print(line2); lcd.print(controlMode == MODE_AUTO ? " AA" : " MA"); break;
     case ERROR_STATE: lcd.print("SENSOR ERROR   "); break;
   }
 }
@@ -455,69 +581,59 @@ void displayLCD() {
 void setup() {
   Serial.begin(115200);
 
-  Wire.begin(21, 22);
+  Wire.begin(21,22);
 
-  pinMode(RELAY_PIN,   OUTPUT);
-  pinMode(BUZZER_PIN,  OUTPUT);
-  pinMode(BTN_MODE_PIN,   INPUT_PULLUP);
-  pinMode(BTN_FAN_PIN,    INPUT_PULLUP);
+  pinMode(RELAY_PIN, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(BTN_FAN_PIN, INPUT_PULLUP);
   pinMode(BTN_BUZZER_PIN, INPUT_PULLUP);
+  pinMode(BTN_MODE_PIN, INPUT_PULLUP);
 
-  digitalWrite(RELAY_PIN,  LOW);
+  digitalWrite(RELAY_PIN, LOW);
   digitalWrite(BUZZER_PIN, BUZZER_OFF);
 
   lcd.init();
   lcd.backlight();
+
   dht.begin();
 
-  logLine("BOOT", "System starting — mode=AUTO");
+  logLine("BOOT", "System starting");
   connectWiFi();
 }
 
 // ================= LOOP =================
 void loop() {
+
   webSocket.loop();
 
   updateSystemState();
   handleSystemState();
 
-  if (millis() - lastSensor > 2000) {
+  if(millis() - lastSensor > 2000) {
     lastSensor = millis();
     readSensor();
     updateAppState();
   }
 
-  handleAppState();
   handleButtons();
+  handleAppState();
 
-  // Phát sự kiện khi appState thay đổi
-  if (appState != lastState) {
+  if(statusDirty) {
+    sendStatus(true);
+    statusDirty = false;
+  }
+
+  if(appState != lastState) {
     logLine("STATE", String(appStateName(lastState)) + " -> " + appStateName(appState));
 
-    // Khi vào ALARM ở AUTO: còi bắt đầu ngay lập tức
-    if (isAutoMode && appState == ALARM) {
-      buzzerOn   = true;
-      buzzer_time = millis();
-      applyBuzzer();
-    }
-
-    // Khi thoát ALARM ở AUTO: tắt còi
-    if (isAutoMode && lastState == ALARM && appState != ALARM) {
-      buzzerOn = false;
-      applyBuzzer();
-    }
-
-    pushEvent(appStateName(appState));
+    sendStatus(true);
     lastState = appState;
   }
 
-  if (millis() - lastLCD > 1000) {
+  if(millis() - lastLCD > 1000) {
     lastLCD = millis();
     displayLCD();
   }
 
-  sendRealtime();
-  processQueue();
-  checkTimeout();
-  heartbeat();
+  sendStatus();
 }

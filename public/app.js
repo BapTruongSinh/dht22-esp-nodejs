@@ -70,18 +70,24 @@ function updateSensor(data) {
 }
 
 function updateFan(state) {
-  fanText.textContent = state;
-  fanText.className   = state === 'ON' ? 'on' : 'off';
+  const isOn = (state == 1 || state === 'ON' || state === 'on');
+  fanText.textContent = isOn ? 'ON' : 'OFF';
+  fanText.className   = isOn ? 'on' : 'off';
 }
 
 function updateBuzzer(state) {
-  buzzerText.textContent = state;
-  buzzerText.className   = state === 'ON' ? 'on' : 'off';
+  const isOn = (state === 'on' || state === 'ON' || state == 1);
+  buzzerText.textContent = isOn ? 'ON' : 'OFF';
+  buzzerText.className   = isOn ? 'on' : 'off';
 }
 
 function updateESP(connected) {
   espDot.className      = connected ? 'dot on' : 'dot';
   espStatus.textContent = connected ? 'ESP đã kết nối' : 'ESP chưa kết nối';
+  if (!connected) {
+    appStateBadge.textContent = "OFFLINE";
+    appStateBadge.className   = "badge badge-error";
+  }
 }
 
 function updateMode(mode) {
@@ -132,23 +138,9 @@ function connect() {
         case 'sensor_update':
           updateSensor(msg);
           if (msg.mode)   updateMode(msg.mode);
-          if (msg.fan   !== undefined) updateFan(msg.fan    ? 'ON' : 'OFF');
-          if (msg.buzzer !== undefined) updateBuzzer(msg.buzzer ? 'ON' : 'OFF');
-          log(`🌡 ${parseFloat(msg.temp).toFixed(1)}°C | 💧 ${parseFloat(msg.humi).toFixed(1)}% | Quạt: ${msg.fan ? 'ON' : 'OFF'} | Còi: ${msg.buzzer ? 'ON' : 'OFF'} | ${msg.app_state}`, 'info');
-          break;
-
-        case 'fan_state':
-          updateFan(msg.state);
-          log(`🌀 Quạt: ${msg.state}`, 'ok');
-          break;
-
-        case 'buzzer_state':
-          updateBuzzer(msg.state);
-          log(`🔔 Còi: ${msg.state}`, msg.state === 'ON' ? 'err' : 'ok');
-          break;
-
-        case 'mode_state':
-          updateMode(msg.mode);
+          if (msg.fan !== undefined) updateFan(msg.fan);
+          if (msg.buzzer_state !== undefined) updateBuzzer(msg.buzzer_state);
+          log(`🌡 ${parseFloat(msg.temp).toFixed(1)}°C | 💧 ${parseFloat(msg.humi).toFixed(1)}% | Quạt: ${msg.fan == 1 ? 'ON' : 'OFF'} | Còi: ${msg.buzzer_state === 'on' ? 'ON' : 'OFF'} | ${msg.app_state}`, 'info');
           break;
 
         case 'event':
@@ -158,6 +150,11 @@ function connect() {
         case 'esp_status':
           updateESP(msg.connected);
           log(`ESP ${msg.connected ? '🟢 kết nối' : '🔴 ngắt kết nối'}`, msg.connected ? 'ok' : 'warn');
+          break;
+
+        case 'offline':
+          log(`[OFFLINE] ${msg.message}`, 'error');
+          updateESP(false);
           break;
 
         case 'error':
