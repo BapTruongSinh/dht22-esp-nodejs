@@ -2,7 +2,7 @@
 // Kết nối: ws://<host>/fe
 //
 // Nhận từ server:
-//   { type: "sensor_update", temp, humi, fan, buzzer, mode, alarm, error, app_state, system_state, timestamp }
+//   { type: "sensor_update", temp, humi, fan, buzzer, mode, alarm, error, app_state, timestamp }
 //   { type: "fan_state",    state: "ON"|"OFF" }
 //   { type: "buzzer_state", state: "ON"|"OFF" }
 //   { type: "mode_state",   mode:  "AUTO"|"MANUAL" }

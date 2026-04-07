@@ -546,8 +546,7 @@ void sendStatus(bool forceSend = false) {
   data += "\"fan\":" + String(fanState == FAN_ON) + ",";
   data += "\"buzzer_state\":\"" + String(buzzerState == BUZZER_IDLE ? "off" : "on") + "\",";
   
-  data += "\"app_state\"😕"" + String(appStateName(appState)) + "\",";
-  data += "\"system_state\"😕"" + String(systemStateName(sysState)) + "\"";
+  data += "\"app_state\":\"" + String(appStateName(appState)) + "\"";
   data += "}";
 
   webSocket.sendTXT(data);

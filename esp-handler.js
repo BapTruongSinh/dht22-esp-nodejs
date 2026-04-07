@@ -1,7 +1,7 @@
 // esp-handler.js – Quản lý kết nối ESP và điều khiển thiết bị
 //
 // ESP -> Server (realtime, mỗi 3s):
-//   { temp, humi, fan, buzzer, mode, alarm, error, app_state, system_state }
+//   { temp, humi, fan, buzzer, mode, alarm, error, app_state }
 //
 // ESP -> Server (sự kiện queue):
 //   { id: N, data: { event: "ALARM_ON" } }
@@ -64,7 +64,7 @@ function handleESPMessage(raw) {
       return { type: 'event', event: msg.data.event };
     }
 
-    // Realtime data: { temp, humi, fan, buzzer_state, mode, app_state, system_state }
+    // Realtime data: { temp, humi, fan, buzzer_state, mode, app_state }
     if (typeof msg.temp === 'number' && typeof msg.humi === 'number') {
       // Đồng bộ trạng thái từ ESP về server
       currentMode  = msg.mode   || 'AUTO';
