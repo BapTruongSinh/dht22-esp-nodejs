@@ -27,6 +27,8 @@ const tempVal     = $('temp-val');
 const humiVal     = $('humi-val');
 const appStateBadge = $('app-state-badge');
 const fanText     = $('fan-state-text');
+const fanSwitch   = $('fanSwitch');
+const alarmSwitch = $('alarmSwitch');
 const logBox      = $('log-box');
 
 // ── Log ─────────────────────────────────────────────────────────────────────
@@ -48,22 +50,51 @@ const STATE_CLASS = {
 };
 
 function updateSensor(data) {
-  tempVal.innerHTML = `${data.temp}<span class="card-unit">°C</span>`;
-  humiVal.innerHTML = `${data.humi}<span class="card-unit">%</span>`;
+  if (tempVal) tempVal.innerHTML = `${data.temp}<span class="card-unit">°C</span>`;
+  if (humiVal) humiVal.innerHTML = `${data.humi}<span class="card-unit">%</span>`;
 
   const state = data.app_state || 'NORMAL';
-  appStateBadge.textContent = state;
-  appStateBadge.className   = `badge ${STATE_CLASS[state] || 'badge-normal'}`;
+  if (appStateBadge) {
+    appStateBadge.textContent = state;
+    appStateBadge.className   = `badge ${STATE_CLASS[state] || 'badge-normal'}`;
+  }
 }
 
 function updateFan(state) {
-  fanText.textContent = state;
-  fanText.className   = state === 'ON' ? 'on' : 'off';
+  const isOn = state === 'ON';
+  if (fanText) {
+    fanText.textContent = state;
+    fanText.className   = isOn ? 'on' : 'off';
+  }
+  if (fanSwitch) fanSwitch.checked = isOn;
+  
+  const fanBadge = $('fanBadge');
+  if (fanBadge) {
+    fanBadge.textContent = isOn ? 'On' : 'Off';
+    fanBadge.className = `status-badge ${isOn ? 'on' : 'off'}`;
+  }
 }
 
 function updateESP(connected) {
-  espDot.className   = connected ? 'dot on' : 'dot';
-  espStatus.textContent = connected ? 'ESP đã kết nối' : 'ESP chưa kết nối';
+  if (wsDot) wsDot.className = connected ? 'dot on' : 'dot';
+  if (espDot) espDot.className = connected ? 'dot on' : 'dot';
+  if (espStatus) espStatus.textContent = connected ? 'ESP đã kết nối' : 'ESP chưa kết nối';
+}
+
+// Cập nhật trạng thái còi trên UI
+function updateBuzzer(active) {
+  // Cập nhật badge trong card điều khiển thiết bị
+  const alarmBadge = $('alarmBadge');
+  if (alarmBadge) {
+    alarmBadge.textContent = active ? 'On' : 'Off';
+    alarmBadge.className   = `status-badge ${active ? 'on' : 'off'}`;
+  }
+  // Cập nhật switch (read-only từ server)
+  if (alarmSwitch) {
+    alarmSwitch._updating = true;   // cờ để không trigger onChange
+    alarmSwitch.checked = active;
+    alarmSwitch._updating = false;
+  }
 }
 
 // ── WebSocket ────────────────────────────────────────────────────────────────
@@ -72,14 +103,14 @@ function connect() {
   ws = new WebSocket(WS_URL);
 
   ws.onopen = () => {
-    wsDot.className   = 'dot on';
-    wsStatus.textContent = 'Đã kết nối server';
+    if (wsDot) wsDot.className = 'dot on';
+    if (wsStatus) wsStatus.textContent = 'Đã kết nối server';
     log('✅ Kết nối server thành công', 'ok');
   };
 
   ws.onclose = () => {
-    wsDot.className   = 'dot';
-    wsStatus.textContent = 'Mất kết nối, thử lại sau 5s...';
+    if (wsDot) wsDot.className = 'dot';
+    if (wsStatus) wsStatus.textContent = 'Mất kết nối, thử lại sau 5s...';
     log('❌ Mất kết nối server', 'warn');
     reconnectTimer = setTimeout(connect, 5000);
   };
@@ -91,15 +122,19 @@ function connect() {
       const msg = JSON.parse(data);
 
       switch (msg.type) {
-
         case 'sensor_update':
           updateSensor(msg);
-          log(`🌡 ${msg.temp}°C | 💧 ${msg.humi}% | Quạt: ${msg.fan ? 'ON' : 'OFF'} | ${msg.app_state}`, 'info');
+          log(`🌡 ${msg.temp}°C | 💧 ${msg.humi}% | Quạt: ${msg.fan ? 'ON' : 'OFF'} | Còi: ${msg.buzzer ? 'ON' : 'OFF'} | ${msg.app_state}`, 'info');
           break;
 
         case 'fan_state':
           updateFan(msg.state);
           log(`🌀 Quạt: ${msg.state}`, 'ok');
+          break;
+
+        case 'buzzer_state':
+          updateBuzzer(msg.active);
+          log(`🔔 Còi: ${msg.active ? 'Đang kêu' : 'Tắt'}`, msg.active ? 'err' : 'ok');
           break;
 
         case 'event':
@@ -137,6 +172,29 @@ function setFan(state) {
 function buzzerOff() {
   send({ type: 'buzzer_off' });
   log('📤 Gửi: Tắt còi', 'info');
+}
+
+// ── Wire sự kiện UI ──────────────────────────────────────────────────────────
+if (fanSwitch) {
+  fanSwitch.addEventListener('change', () => {
+    setFan(fanSwitch.checked ? 'ON' : 'OFF');
+  });
+}
+
+// Switch còi: chỉ cho tắt từ FE (không cho bật tay)
+if (alarmSwitch) {
+  alarmSwitch.addEventListener('change', () => {
+    if (alarmSwitch._updating) return; // bỏ qua nếu do server cập nhật
+    if (!alarmSwitch.checked) {
+      buzzerOff(); // Người dùng kéo sang tắt → gửi lệnh tắt còi
+    } else {
+      // Không cho bật từ FE, reset lại
+      alarmSwitch._updating = true;
+      alarmSwitch.checked = false;
+      alarmSwitch._updating = false;
+      log('⚠️ Chỉ có thể tắt còi từ FE, không bật được', 'warn');
+    }
+  });
 }
 
 // ── Khởi động ────────────────────────────────────────────────────────────────

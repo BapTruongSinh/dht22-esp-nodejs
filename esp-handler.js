@@ -13,6 +13,7 @@
 
 let espClient  = null;
 let fanState   = 'OFF';   // trạng thái quạt server đang giữ
+let buzzerState = false;  // trạng thái còi hiện tại (true = đang kêu)
 let lastData   = null;    // dữ liệu cảm biến mới nhất từ ESP
 
 function registerESP(ws) {
@@ -50,10 +51,14 @@ function handleESPMessage(raw) {
       return { type: 'event', event: msg.data.event };
     }
 
-    // Realtime data: { temp, humi, fan, alarm, error, app_state, system_state }
+    // Realtime data: { temp, humi, fan, buzzer, alarm, error, app_state, system_state }
     if (typeof msg.temp === 'number' && typeof msg.humi === 'number') {
+      // Cập nhật trạng thái còi từ ESP
+      if (typeof msg.buzzer !== 'undefined') {
+        buzzerState = msg.buzzer === 1;
+      }
       lastData = { ...msg, timestamp: new Date().toISOString() };
-      console.log(`[ESP] temp=${msg.temp}°C  humi=${msg.humi}%  fan=${msg.fan}  alarm=${msg.alarm}`);
+      console.log(`[ESP] temp=${msg.temp}°C  humi=${msg.humi}%  fan=${msg.fan}  alarm=${msg.alarm}  buzzer=${msg.buzzer}`);
       return { type: 'sensor', data: lastData };
     }
 
@@ -83,7 +88,8 @@ module.exports = {
   handleESPMessage,
   setFan,
   buzzerOff,
-  isConnected: () => espClient !== null && espClient.readyState === 1,
-  getFanState:  () => fanState,
-  getLastData:  () => lastData,
+  isConnected:    () => espClient !== null && espClient.readyState === 1,
+  getFanState:    () => fanState,
+  getBuzzerState: () => buzzerState,
+  getLastData:    () => lastData,
 };

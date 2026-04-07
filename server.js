@@ -66,6 +66,8 @@ wss.on('connection', (ws, req) => {
 
       if (result.type === 'sensor') {
         broadcast({ type: 'sensor_update', ...result.data });
+        // Broadcast trạng thái còi riêng để FE cập nhật badge
+        broadcast({ type: 'buzzer_state', active: esp.getBuzzerState() });
       } else if (result.type === 'event') {
         broadcast({ type: 'event', event: result.event });
       }
@@ -88,6 +90,7 @@ wss.on('connection', (ws, req) => {
     // Gửi trạng thái hiện tại ngay khi FE kết nối
     ws.send(JSON.stringify({ type: 'esp_status', connected: esp.isConnected() }));
     ws.send(JSON.stringify({ type: 'fan_state', state: esp.getFanState() }));
+    ws.send(JSON.stringify({ type: 'buzzer_state', active: esp.getBuzzerState() }));
     const last = esp.getLastData();
     if (last) ws.send(JSON.stringify({ type: 'sensor_update', ...last }));
 

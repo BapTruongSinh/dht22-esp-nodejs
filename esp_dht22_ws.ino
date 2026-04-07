@@ -3,6 +3,7 @@
 #include <LiquidCrystal_I2C.h>
 #include <DHT.h>
 #include <Wire.h>
+#include <ArduinoJson.h>
 
 // ================= WIFI =================
 const char* ssid = "Khu H";
@@ -20,6 +21,7 @@ const int port = 3000;
 // ================= HARDWARE =================
 #define RELAY_PIN 18
 #define BUZZER_PIN 19
+#define BTN_BUZZER_PIN 23   // Nút bấm vật lý tắt còi (INPUT_PULLUP: LOW = bấm)
 #define BUZZER_ON LOW
 #define BUZZER_OFF HIGH
 
@@ -46,7 +48,9 @@ bool errorSensor = false;
 int errorSensorCount = 0;
 
 // ================= CONTROL =================
-bool buzzerOn = false;
+bool buzzerOn   = false;
+bool buzzerMuted = false;     // true = đã bị tắt thủ công (vật lý hoặc FE)
+bool btnPrevState = HIGH;     // trạng thái trước của nút bấm vật lý
 unsigned long buzzer_time = 0;
 
 // ================= TIMER =================
@@ -197,14 +201,34 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
 
     case WStype_TEXT: {
       String msg = String((char*)payload);
-
       logLine("WS RX", msg);
 
+      // Kiểm tra ACK trước
       if((msg == "ACK" || msg.startsWith("{\"ack\":")) && waitingAck) {
         waitingAck = false;
         int ackedId = queue[0].id;
         removeQueue();
         logLine("ACK", "Confirmed message id=" + String(ackedId) + ", pending=" + String(queueSize));
+        break;
+      }
+
+      // Parse JSON lệnh điều khiển từ server
+      StaticJsonDocument<128> doc;
+      DeserializationError err = deserializeJson(doc, msg);
+      if (!err) {
+        // Lệnh tắt còi từ FE
+        if (doc.containsKey("buzzer") && String(doc["buzzer"].as<const char*>()) == "OFF") {
+          buzzerMuted = true;
+          buzzerOn = false;
+          digitalWrite(BUZZER_PIN, BUZZER_OFF);
+          logLine("WS CMD", "Buzzer OFF (remote)");
+        }
+        // Lệnh điều khiển quạt từ FE
+        if (doc.containsKey("fan")) {
+          String fanCmd = doc["fan"].as<String>();
+          digitalWrite(RELAY_PIN, fanCmd == "ON" ? HIGH : LOW);
+          logLine("WS CMD", "Fan " + fanCmd);
+        }
       }
       break;
     }
@@ -264,18 +288,39 @@ void handleAppState() {
 
     case ALARM:
       digitalWrite(RELAY_PIN, HIGH);
-      if(millis() - buzzer_time > 500) {
-        buzzer_time = millis();
-        buzzerOn = !buzzerOn;
-        digitalWrite(BUZZER_PIN, buzzerOn ? BUZZER_ON : BUZZER_OFF);
+      if (!buzzerMuted) {
+        // Còi chưa bị tắt thủ công → blink mỗi 500ms
+        if(millis() - buzzer_time > 500) {
+          buzzer_time = millis();
+          buzzerOn = !buzzerOn;
+          digitalWrite(BUZZER_PIN, buzzerOn ? BUZZER_ON : BUZZER_OFF);
+        }
+      } else {
+        // Đã tắt thủ công → giữ tắt
+        buzzerOn = false;
+        digitalWrite(BUZZER_PIN, BUZZER_OFF);
       }
       break;
 
     case ERROR_STATE:
       digitalWrite(RELAY_PIN, HIGH);
       digitalWrite(BUZZER_PIN, BUZZER_ON);
+      buzzerOn = true;
       break;
   }
+}
+
+// ================= NÚT BẤM VẬT LÝ =================
+void handleBuzzerButton() {
+  bool curState = digitalRead(BTN_BUZZER_PIN);
+  // Phát hiện cạnh xuống (HIGH → LOW): nút vừa được bấm
+  if (btnPrevState == HIGH && curState == LOW) {
+    buzzerMuted = true;
+    buzzerOn    = false;
+    digitalWrite(BUZZER_PIN, BUZZER_OFF);
+    logLine("BTN", "Buzzer OFF (physical button)");
+  }
+  btnPrevState = curState;
 }
 
 // ================= EVENT =================
@@ -350,6 +395,7 @@ void sendRealtime() {
     data += "\"temp\":" + String(temp) + ",";
     data += "\"humi\":" + String(humi) + ",";
     data += "\"fan\":" + String(digitalRead(RELAY_PIN)) + ",";
+    data += "\"buzzer\":" + String(buzzerOn ? 1 : 0) + ",";  // <-- trạng thái còi
     data += "\"alarm\":" + String(appState == ALARM) + ",";
     data += "\"error\":" + String(appState == ERROR_STATE) + ",";
     data += "\"app_state\":\"" + String(appStateName(appState)) + "\",";
@@ -401,6 +447,7 @@ void setup() {
 
   pinMode(RELAY_PIN, OUTPUT);
   pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(BTN_BUZZER_PIN, INPUT_PULLUP);  // Nút bấm nội trở kéo lên
 
   digitalWrite(RELAY_PIN, LOW);
   digitalWrite(BUZZER_PIN, BUZZER_OFF);
@@ -434,9 +481,14 @@ void loop() {
     logLine("STATE", String(appStateName(lastState)) + " -> " + appStateName(appState));
 
     if(appState == ALARM) {
+      // Vào ALARM mới → reset mute, bắt đầu kêu
+      buzzerMuted = false;
       buzzerOn = true;
       buzzer_time = millis();
       digitalWrite(BUZZER_PIN, BUZZER_ON);
+    } else {
+      // Thoát khỏi ALARM → reset mute để lần sau kêu bình thường
+      buzzerMuted = false;
     }
 
     if(appState == ALARM) pushEvent("ALARM_ON");
@@ -451,6 +503,8 @@ void loop() {
     lastLCD = millis();
     displayLCD();
   }
+
+  handleBuzzerButton();  // Đọc nút bấm vật lý tắt còi
 
   sendRealtime();
   processQueue();
