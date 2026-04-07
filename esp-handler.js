@@ -1,13 +1,3 @@
-// esp-handler.js – Quản lý kết nối ESP và điều khiển thiết bị
-//
-// ESP -> Server (realtime, mỗi 3s):
-//   { temp, humi, fan, buzzer, mode, alarm, error, app_state }
-//
-// Server -> ESP (lệnh điều khiển):
-//   { fan: "ON" | "OFF" }        — chỉ có tác dụng khi ESP ở MANUAL
-//   { buzzer: "OFF" }            — chỉ có tác dụng khi ESP ở MANUAL
-//   { mode: "AUTO" | "MANUAL" }  — chuyển chế độ
-
 let espClient  = null;
 let fanState   = 'OFF';    // trạng thái quạt server theo dõi
 let buzzerState= 'OFF';    // trạng thái còi server theo dõi
@@ -25,12 +15,11 @@ function toBool(value) {
   return false;
 }
 
-// ── Kết nối / Ngắt kết nối ───────────────────────────────────────────────────
+//Kết nối / Ngắt kết nối
 function registerESP(ws) {
   espClient = ws;
   lastSeenAt = Date.now();
   console.log('[ESP] Kết nối');
-  // Đồng bộ mode hiện tại xuống ESP ngay khi nối
   sendToESP({ mode: currentMode });
 }
 
@@ -40,7 +29,7 @@ function unregisterESP() {
   console.log('[ESP] Ngắt kết nối');
 }
 
-// ── Gửi JSON xuống ESP ───────────────────────────────────────────────────────
+//Gửi JSON xuống ESP
 function sendToESP(payload) {
   if (espClient && espClient.readyState === 1) {
     espClient.send(JSON.stringify(payload));
@@ -50,8 +39,7 @@ function sendToESP(payload) {
   }
 }
 
-// ── Xử lý tin nhắn từ ESP ────────────────────────────────────────────────────
-// Trả về { type, data } hoặc null
+// Xử lý tin nhắn từ ESP
 function handleESPMessage(raw) {
   try {
     lastSeenAt = Date.now();
@@ -60,7 +48,6 @@ function handleESPMessage(raw) {
 
 // Realtime data: { temp, humi, fan, buzzer_state, mode, app_state }
     if (typeof msg.temp === 'number' && typeof msg.humi === 'number') {
-      // Đồng bộ trạng thái từ ESP về server
       currentMode  = msg.mode   || 'AUTO';
       fanState     = toBool(msg.fan) ? 'ON' : 'OFF';
       buzzerState  = toBool(msg.buzzer_state) ? 'ON' : 'OFF';
@@ -79,13 +66,12 @@ function handleESPMessage(raw) {
     console.warn('[ESP] Tin nhắn không xác định:', raw);
     return null;
   } catch {
-    console.error('[ESP] Parse lỗi:', raw);
+    console.error('[ESP] Lỗi:', raw);
     return null;
   }
 }
 
-// ── Lệnh từ FE: Bật/Tắt quạt ────────────────────────────────────────────────
-// Trả về true nếu lệnh được chấp nhận, false nếu bị chặn (đang AUTO)
+//Lệnh từ FE: Bật/Tắt quạt 
 function setFan(state) {
   if (state !== 'ON' && state !== 'OFF') return false;
 
@@ -99,8 +85,7 @@ function setFan(state) {
   return true;
 }
 
-// ── Lệnh từ FE: Tắt còi ─────────────────────────────────────────────────────
-// Trả về true nếu lệnh được chấp nhận, false nếu bị chặn (đang AUTO)
+//Lệnh từ FE: Tắt còi 
 function buzzerOff() {
   if (currentMode === 'AUTO') {
     console.warn('[ESP] Chặn lệnh tắt còi — đang ở chế độ AUTO');
@@ -111,7 +96,7 @@ function buzzerOff() {
   return true;
 }
 
-// ── Lệnh từ FE: Chuyển mode ─────────────────────────────────────────────────
+//Lệnh từ FE: Chuyển mode
 function setMode(mode) {
   if (mode !== 'AUTO' && mode !== 'MANUAL') return;
   currentMode = mode;
@@ -119,7 +104,7 @@ function setMode(mode) {
   console.log(`[ESP] Mode -> ${mode}`);
 }
 
-// ── Exports ──────────────────────────────────────────────────────────────────
+// Exports
 module.exports = {
   registerESP,
   unregisterESP,
