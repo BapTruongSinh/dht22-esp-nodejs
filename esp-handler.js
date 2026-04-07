@@ -58,16 +58,13 @@ function handleESPMessage(raw) {
     if (typeof msg.temp === 'number' && typeof msg.humi === 'number') {
       // Đồng bộ trạng thái từ ESP về server
       currentMode  = msg.mode   || 'AUTO';
-      fanState     = msg.fan    ? 'ON' : 'OFF';
-      buzzerState  = msg.buzzer ? 'ON' : 'OFF';
+      fanState     = toBool(msg.fan) ? 'ON' : 'OFF';
+      buzzerState  = toBool(msg.buzzer) ? 'ON' : 'OFF'
 
       lastData = { ...msg, timestamp: new Date().toISOString() };
       console.log(`[ESP] temp=${msg.temp}°C  humi=${msg.humi}%  fan=${fanState}  buzzer=${buzzerState}  mode=${currentMode}`);
       return { type: 'sensor', data: lastData };
     }
-
-    // Heartbeat ping
-    if (msg.topic === 'ping') return null;
 
     console.warn('[ESP] Tin nhắn không xác định:', raw);
     return null;

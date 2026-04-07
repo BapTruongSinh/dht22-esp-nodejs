@@ -72,9 +72,7 @@ wss.on('connection', (ws, req) => {
         broadcast({ type: 'sensor_update', ...result.data });
         broadcast({ type: 'mode_state',   mode:  result.data.mode });
         broadcast({ type: 'fan_state',    state: result.data.fan    ? 'ON' : 'OFF' });
-        broadcast({ type: 'buzzer_state', state: result.data.buzzer ? 'ON' : 'OFF' });
-      } else if (result.type === 'event') {
-        broadcast({ type: 'event', event: result.event });
+        broadcast({ type: 'buzzer_state', state: result.data.buzzer ? 'ON' : 'OFF' }); 
       }
     });
 
