@@ -12,6 +12,8 @@
 //   { type: "buzzer_off" }
 
 const WS_URL = `ws://${location.host}/fe`;
+const MAX_POINTS = 20;
+
 let ws = null;
 let reconnectTimer = null;
 

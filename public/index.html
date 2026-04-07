@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="vi">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -147,6 +148,7 @@
     .log-err  { color: #f87171; }
   </style>
 </head>
+
 <body>
 
   <h1>🌡️ IoT Dashboard – DHT22</h1>
@@ -195,8 +197,77 @@
     </div>
   </div>
 
-  <!-- Log -->
-  <div id="log-box"></div>
+          <article class="chart-card">
+            <div class="card-head">
+              <div>
+                <h3 class="card-title">Biểu đồ độ ẩm không khí</h3>
+              </div>
+            </div>
+            <div class="chart-shell">
+              <canvas id="humidityChart"></canvas>
+            </div>
+          </article>
+        </div>
+
+        <article class="device-card device-card-compact">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title">Điều khiển thiết bị</h3>
+              <p class="card-subtitle">Quạt và còi cảnh báo</p>
+            </div>
+          </div>
+
+          <div class="device-list compact">
+            <div class="device-item">
+              <div class="device-top">
+                <div class="device-left">
+                  <div class="device-icon"><i class="fa-solid fa-fan"></i></div>
+                  <div>
+                    <div class="device-name">Quạt thông gió</div>
+                    <div class="device-desc">Điều khiển quạt làm mát.</div>
+                  </div>
+                </div>
+                <span class="status-badge on" id="fanBadge">On</span>
+              </div>
+              <div class="device-bottom">
+                <div class="device-power">Thiết bị quạt</div>
+                <label class="switch">
+                  <input type="checkbox" id="fanSwitch" checked />
+                  <span></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="device-item">
+              <div class="device-top">
+                <div class="device-left">
+                  <div class="device-icon" style="background:rgba(239,68,68,.10); color:var(--danger);"><i
+                      class="fa-solid fa-bullhorn"></i></div>
+                  <div>
+                    <div class="device-name">Còi cảnh báo</div>
+                    <div class="device-desc">Điều khiển còi cảnh báo.</div>
+                  </div>
+                </div>
+                <span class="status-badge off" id="alarmBadge">Off</span>
+              </div>
+              <div class="device-bottom">
+                <div class="device-power">Thiết bị còi</div>
+                <label class="switch">
+                  <input type="checkbox" id="alarmSwitch" />
+                  <span></span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="device-actions">
+            <button class="btn btn-primary" id="allOnBtn">Bật tất cả</button>
+            <button class="btn btn-secondary" id="allOffBtn">Tắt tất cả</button>
+          </div>
+        </article>
+      </section>
+    </section>
+  </main>
 
   <script src="app.js"></script>
 </body>
