@@ -55,22 +55,26 @@ ws.onmessage = (event) => {
         } else {
           updateSensors(msg.temp, msg.humi);
           pushChartData(msg.temp, msg.humi);
+          
+          // Đồng bộ toàn bộ trạng thái thiết bị từ gói sensor_update
+          syncDeviceUI(msg);
         }
         if (msg.app_state) document.getElementById('appStateValue').textContent = `Trạng thái: ${msg.app_state}`;
         break;
 
       case 'fan_state':
-        fanSwitch.checked = msg.state === 'ON';
-        updateDevices();
+        // Gói lẻ: {state: "ON"|"OFF"} -> Đồng bộ quạt
+        syncDeviceUI({ fan: msg.state === 'ON' });
         break;
 
       case 'mode_state':
-        updateModeUI(msg.mode);
+        // Gói lẻ: {mode: "AUTO"|"MANUAL"} -> Đồng bộ mode
+        syncDeviceUI({ mode: msg.mode });
         break;
 
       case 'buzzer_state':
-        currentAlarmState = msg.state === 'ON';
-        updateDevices();
+        // Gói lẻ: {state: "ON"|"OFF"} -> Đồng bộ còi
+        syncDeviceUI({ buzzer: msg.state === 'ON' });
         break;
 
       case 'esp_status': {
@@ -123,6 +127,7 @@ const updateSensors = (temp, humidity) => {
 
 const updateBadge = (badgeId, isOn) => {
   const badge = document.getElementById(badgeId);
+  if (!badge) return;
   badge.textContent = isOn ? 'On' : 'Off';
   badge.className = 'status-badge ' + (isOn ? 'on' : 'off');
 }
@@ -130,6 +135,27 @@ const updateBadge = (badgeId, isOn) => {
 const updateDevices = () => {
   updateBadge('fanBadge', fanSwitch.checked);
   updateBadge('alarmBadge', currentAlarmState);
+}
+
+// Hàm đồng bộ toàn diện giao diện thiết bị
+const syncDeviceUI = (data) => {
+  // Đồng bộ Mode
+  if (data.mode !== undefined) {
+    updateModeUI(data.mode);
+  }
+  
+  // Đồng bộ FAN
+  if (data.fan !== undefined) {
+    fanSwitch.checked = (data.fan === true || data.fan === 'ON');
+  }
+  
+  // Đồng bộ BUZZER
+  if (data.buzzer !== undefined) {
+    currentAlarmState = (data.buzzer === true || data.buzzer === 'ON');
+  }
+  
+  // Cập nhật lại các Badge trên màn hình
+  updateDevices();
 }
 
 // Điều khiển thiết bị

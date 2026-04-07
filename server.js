@@ -76,11 +76,7 @@ ws.on('message', raw => {
       if (!result) return;
 
       if (result.type === 'sensor') {
-        // Broadcast dữ liệu cảm biến + trạng thái mode/buzzer/fan
         broadcast({ type: 'sensor_update', ...result.data });
-        broadcast({ type: 'mode_state',   mode:  result.data.mode });
-        broadcast({ type: 'fan_state',    state: result.data.fan    ? 'ON' : 'OFF' });
-        broadcast({ type: 'buzzer_state', state: result.data.buzzer ? 'ON' : 'OFF' });
       }
     });
 
@@ -98,11 +94,8 @@ ws.on('message', raw => {
     feClients.add(ws);
     console.log(`[FE] Kết nối (${feClients.size} client)`);
 
-    // Gửi toàn bộ trạng thái hiện tại ngay khi FE kết nối
+    // Gửi trạng thái kết nối & dữ liệu cảm biến mới nhất (nếu có)
     ws.send(JSON.stringify({ type: 'esp_status',   connected: esp.isConnected() }));
-    ws.send(JSON.stringify({ type: 'mode_state',   mode:  esp.getMode() }));
-    ws.send(JSON.stringify({ type: 'fan_state',    state: esp.getFanState() }));
-    ws.send(JSON.stringify({ type: 'buzzer_state', state: esp.getBuzzerState() }));
     const last = esp.getLastData();
     if (last) ws.send(JSON.stringify({ type: 'sensor_update', ...last }));
 

@@ -3,10 +3,6 @@
 // ESP -> Server (realtime, mỗi 3s):
 //   { temp, humi, fan, buzzer, mode, alarm, error, app_state }
 //
-// ESP -> Server (sự kiện queue):
-//   { id: N, data: { event: "ALARM_ON" } }
-//   -> Server phải reply: {"ack": N}
-//
 // Server -> ESP (lệnh điều khiển):
 //   { fan: "ON" | "OFF" }        — chỉ có tác dụng khi ESP ở MANUAL
 //   { buzzer: "OFF" }            — chỉ có tác dụng khi ESP ở MANUAL
@@ -55,19 +51,13 @@ function sendToESP(payload) {
 }
 
 // ── Xử lý tin nhắn từ ESP ────────────────────────────────────────────────────
-// Trả về { type, data } hoặc { type: 'event', event } hoặc null
+// Trả về { type, data } hoặc null
 function handleESPMessage(raw) {
   try {
     lastSeenAt = Date.now();
     console.log('[ESP] Raw:', raw);
     const msg = JSON.parse(raw);
 
-    // Queue event: { id, data: { event: "..." } }
-    if (typeof msg.id === 'number' && msg.data) {
-      sendToESP({ ack: msg.id });
-      console.log(`[ESP] Event id=${msg.id} event=${msg.data.event}`);
-      return { type: 'event', event: msg.data.event };
-    }
 // Realtime data: { temp, humi, fan, buzzer_state, mode, app_state }
     if (typeof msg.temp === 'number' && typeof msg.humi === 'number') {
       // Đồng bộ trạng thái từ ESP về server
