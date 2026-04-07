@@ -82,6 +82,8 @@ ws.onmessage = (event) => {
 
         if (!msg.connected) {
           appStateValue.textContent = 'Trạng thái: ngắt kết nối';
+          tempValueEl.textContent = '--';
+          humidityValueEl.textContent = '--';
         }
 
         break;
