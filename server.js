@@ -12,9 +12,7 @@
 //
 // Server -> FE:
 //   { type: "sensor_update", temp, humi, fan, buzzer, mode, alarm, error, app_state, timestamp }
-//   { type: "fan_state",    state: "ON"|"OFF" }
-//   { type: "buzzer_state", state: "ON"|"OFF" }
-//   { type: "mode_state",   mode:  "AUTO"|"MANUAL" }
+//   { type: "event",        event: "ALARM"|"NORMAL"|... }
 //   { type: "esp_status",   connected: bool }
 //   { type: "error",        reason: "AUTO_MODE" }  – khi lệnh bị chặn
 
@@ -70,9 +68,6 @@ wss.on('connection', (ws, req) => {
       if (result.type === 'sensor') {
         // Broadcast dữ liệu cảm biến + trạng thái mode/buzzer/fan
         broadcast({ type: 'sensor_update', ...result.data });
-        broadcast({ type: 'mode_state',   mode:  result.data.mode });
-        broadcast({ type: 'fan_state',    state: result.data.fan    ? 'ON' : 'OFF' });
-        broadcast({ type: 'buzzer_state', state: result.data.buzzer ? 'ON' : 'OFF' });
       }
     });
 

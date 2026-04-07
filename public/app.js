@@ -3,9 +3,6 @@
 //
 // Nhận từ server:
 //   { type: "sensor_update", temp, humi, fan, buzzer, mode, alarm, error, app_state, timestamp }
-//   { type: "fan_state",    state: "ON"|"OFF" }
-//   { type: "buzzer_state", state: "ON"|"OFF" }
-//   { type: "mode_state",   mode:  "AUTO"|"MANUAL" }
 //   { type: "event",        event: "ALARM"|"NORMAL"|... }
 //   { type: "esp_status",   connected: bool }
 //   { type: "error",        reason: "AUTO_MODE" }
