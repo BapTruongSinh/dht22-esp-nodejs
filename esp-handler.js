@@ -1,114 +1,89 @@
-/**
- * esp-handler.js
- * Quản lý trạng thái kết nối ESP và dữ liệu cảm biến.
- */
+// esp-handler.js – Quản lý kết nối ESP và điều khiển thiết bị
+//
+// ESP -> Server (realtime, mỗi 3s):
+//   { temp, humi, fan, alarm, error, app_state, system_state }
+//
+// ESP -> Server (sự kiện queue):
+//   { id: N, data: { event: "ALARM_ON" } }
+//   -> Server phải reply: {"ack": N}
+//
+// Server -> ESP (lệnh điều khiển):
+//   { fan: "ON" | "OFF" }
+//   { buzzer: "OFF" }
 
-let espClient = null;         // Đối tượng WebSocket của ESP đang kết nối
-let motorState = 'OFF';       // Trạng thái động cơ hiện tại ('ON' / 'OFF')
-let lastSensorData = null;    // Dữ liệu cảm biến mới nhất
+let espClient  = null;
+let fanState   = 'OFF';   // trạng thái quạt server đang giữ
+let lastData   = null;    // dữ liệu cảm biến mới nhất từ ESP
 
-/**
- * Đăng ký một ESP client mới.
- * @param {WebSocket} ws - Đối tượng WebSocket từ thư viện `ws`.
- */
 function registerESP(ws) {
   espClient = ws;
-  console.log('[ESP-HANDLER] ESP đã kết nối.');
-
-  // Ngay khi kết nối, đồng bộ trạng thái động cơ hiện tại xuống ESP
-  sendMotorCommand(motorState);
+  console.log('[ESP] Kết nối');
+  // Đồng bộ trạng thái quạt hiện tại xuống ESP
+  sendToESP({ fan: fanState });
 }
 
-/**
- * Xóa đăng ký ESP khi nó ngắt kết nối.
- */
 function unregisterESP() {
   espClient = null;
-  console.log('[ESP-HANDLER] ESP đã ngắt kết nối.');
+  console.log('[ESP] Ngắt kết nối');
 }
 
-/**
- * Xử lý tin nhắn JSON nhận được từ ESP.
- * Expected format: { "type": "sensor", "temp": 28.5, "humidity": 65.2 }
- * @param {string} rawMessage - Chuỗi JSON thô từ ESP.
- * @returns {object|null} Dữ liệu đã parse, hoặc null nếu không hợp lệ.
- */
-function handleESPMessage(rawMessage) {
-  try {
-    const data = JSON.parse(rawMessage);
+// Gửi JSON xuống ESP
+function sendToESP(payload) {
+  if (espClient && espClient.readyState === 1) {
+    espClient.send(JSON.stringify(payload));
+    console.log('[ESP] Gửi:', payload);
+  } else {
+    console.warn('[ESP] Chưa kết nối, bỏ qua lệnh:', payload);
+  }
+}
 
-    if (data.type === 'sensor') {
-      if (typeof data.temp !== 'number' || typeof data.humidity !== 'number') {
-        console.warn('[ESP-HANDLER] Dữ liệu cảm biến không hợp lệ:', data);
-        return null;
-      }
-      lastSensorData = {
-        temp: data.temp,
-        humidity: data.humidity,
-        timestamp: new Date().toISOString(),
-      };
-      console.log(`[ESP-HANDLER] Sensor data: Nhiệt độ=${data.temp}°C, Độ ẩm=${data.humidity}%`);
-      return lastSensorData;
+// Xử lý tin nhắn từ ESP
+// Trả về { type, data } hoặc null
+function handleESPMessage(raw) {
+  try {
+    const msg = JSON.parse(raw);
+
+    // Queue event: { id, data: { event: "..." } }
+    if (typeof msg.id === 'number' && msg.data) {
+      sendToESP({ ack: msg.id });
+      console.log(`[ESP] Event id=${msg.id} event=${msg.data.event}`);
+      return { type: 'event', event: msg.data.event };
     }
 
-    console.warn('[ESP-HANDLER] Loại tin nhắn không xác định:', data.type);
+    // Realtime data: { temp, humi, fan, alarm, error, app_state, system_state }
+    if (typeof msg.temp === 'number' && typeof msg.humi === 'number') {
+      lastData = { ...msg, timestamp: new Date().toISOString() };
+      console.log(`[ESP] temp=${msg.temp}°C  humi=${msg.humi}%  fan=${msg.fan}  alarm=${msg.alarm}`);
+      return { type: 'sensor', data: lastData };
+    }
+
+    console.warn('[ESP] Tin nhắn không xác định:', raw);
     return null;
-  } catch (err) {
-    console.error('[ESP-HANDLER] Lỗi parse JSON từ ESP:', err.message);
+  } catch {
+    console.error('[ESP] Parse lỗi:', raw);
     return null;
   }
 }
 
-/**
- * Gửi lệnh điều khiển động cơ đến ESP.
- * @param {string} command - 'ON' hoặc 'OFF'
- * @returns {boolean} true nếu gửi thành công, false nếu ESP chưa kết nối.
- */
-function sendMotorCommand(command) {
-  const validCommands = ['ON', 'OFF'];
-  if (!validCommands.includes(command)) {
-    console.error(`[ESP-HANDLER] Lệnh không hợp lệ: ${command}`);
-    return false;
-  }
-
-  motorState = command;
-
-  if (espClient && espClient.readyState === 1 /* WebSocket.OPEN */) {
-    const payload = JSON.stringify({ type: 'motor', state: motorState });
-    espClient.send(payload);
-    console.log(`[ESP-HANDLER] Đã gửi lệnh đến ESP: motor=${motorState}`);
-    return true;
-  } else {
-    console.warn('[ESP-HANDLER] ESP chưa kết nối. Lệnh sẽ được gửi khi ESP kết nối lại.');
-    return false;
-  }
+// FE yêu cầu bật/tắt quạt
+function setFan(state) {
+  if (state !== 'ON' && state !== 'OFF') return;
+  fanState = state;
+  sendToESP({ fan: fanState });
 }
 
-/**
- * Toggle trạng thái động cơ (ON -> OFF, OFF -> ON).
- * @returns {string} Trạng thái mới của động cơ.
- */
-function toggleMotor() {
-  const newState = motorState === 'ON' ? 'OFF' : 'ON';
-  sendMotorCommand(newState);
-  return motorState;
-}
-
-/**
- * Kiểm tra ESP có đang kết nối không.
- * @returns {boolean}
- */
-function isESPConnected() {
-  return espClient !== null && espClient.readyState === 1;
+// FE yêu cầu tắt còi
+function buzzerOff() {
+  sendToESP({ buzzer: 'OFF' });
 }
 
 module.exports = {
   registerESP,
   unregisterESP,
   handleESPMessage,
-  sendMotorCommand,
-  toggleMotor,
-  isESPConnected,
-  getMotorState: () => motorState,
-  getLastSensorData: () => lastSensorData,
+  setFan,
+  buzzerOff,
+  isConnected: () => espClient !== null && espClient.readyState === 1,
+  getFanState:  () => fanState,
+  getLastData:  () => lastData,
 };

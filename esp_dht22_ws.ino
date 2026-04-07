@@ -1,174 +1,459 @@
-/*
- * esp_dht22_ws.ino
- * ─────────────────────────────────────────────────────────
- * Firmware cho ESP8266 (hoặc ESP32 - xem ghi chú bên dưới)
- * Kết nối WiFi -> Kết nối WebSocket Server -> Gửi DHT22 -> Điều khiển Động cơ
- *
- * Thư viện cần cài (Arduino Library Manager):
- *   1. DHT sensor library  (by Adafruit)
- *   2. Adafruit Unified Sensor
- *   3. WebSockets           (by Markus Sattler) - tìm "WebSockets" by Links2004
- *   4. ArduinoJson          (by Benoit Blanchon) - phiên bản 6.x
- *
- * Sơ đồ nối dây DHT22:
- *   DHT22 VCC  -> 3.3V
- *   DHT22 GND  -> GND
- *   DHT22 DATA -> D4 (GPIO 2)  + điện trở 10kΩ lên 3.3V
- *
- * Relay / Driver động cơ:
- *   IN         -> D1 (GPIO 5)
- *   VCC, GND   -> cấp nguồn riêng phù hợp với động cơ
- * ─────────────────────────────────────────────────────────
- * Để dùng với ESP32, thay:
- *   #include <ESP8266WiFi.h>   ->  #include <WiFi.h>
- *   #include <ESP8266HTTPClient.h> (nếu có) -> <HTTPClient.h>
- *   WebSocketsClient đồng nhất cho cả 2.
- */
-
-#include <Arduino.h>
-#include <ESP8266WiFi.h>          // ESP32: <WiFi.h>
-#include <WebSocketsClient.h>     // thư viện WebSockets by Links2004
-#include <ArduinoJson.h>
+#include <WiFi.h>
+#include <WebSocketsClient.h>
+#include <LiquidCrystal_I2C.h>
 #include <DHT.h>
+#include <Wire.h>
 
-// ── Cấu hình WiFi ─────────────────────────────────────────
-#define WIFI_SSID     "TEN_WIFI_CUA_BAN"
-#define WIFI_PASSWORD "MAT_KHAU_WIFI"
+// ================= WIFI =================
+const char* ssid = "Khu H";
+const char* password = "khuh1234";
 
-// ── Cấu hình Server ───────────────────────────────────────
-// Thay bằng IP hoặc domain thật của server Node.js
-#define SERVER_HOST   "192.168.1.100"
-#define SERVER_PORT   3000
-#define SERVER_PATH   "/esp"       // path dành cho ESP
+// ================= WS =================
+WebSocketsClient webSocket;
+const char* host = "10.85.7.197";
+const int port = 3000;
 
-// ── Phần cứng ─────────────────────────────────────────────
-#define DHT_PIN       2            // D4 trên NodeMCU (GPIO 2)
-#define DHT_TYPE      DHT22
-#define MOTOR_PIN     5            // D1 trên NodeMCU (GPIO 5)
+// ================= SENSOR =================
+#define DHTPIN 15
+#define DHTTYPE DHT22
 
-// ── Thời gian ─────────────────────────────────────────────
-#define SEND_INTERVAL 3000         // Gửi dữ liệu mỗi 3 giây (ms)
+// ================= HARDWARE =================
+#define RELAY_PIN 18
+#define BUZZER_PIN 19
+#define BUZZER_ON LOW
+#define BUZZER_OFF HIGH
 
-// ── Khởi tạo đối tượng ────────────────────────────────────
-DHT dht(DHT_PIN, DHT_TYPE);
-WebSocketsClient wsClient;
+// ================= LIMIT =================
+#define TEMP_LIMIT 28
+#define HUMI_LIMIT 85
+#define TEMP_ALARM 32
+#define HUMI_ALARM 95
 
-bool motorState = false;           // false = OFF, true = ON
-unsigned long lastSendTime = 0;
+DHT dht(DHTPIN, DHTTYPE);
+LiquidCrystal_I2C lcd(0x27,16,2);
 
-// ═══════════════════════════════════════════════════════════
-//  Callback sự kiện WebSocket
-// ═══════════════════════════════════════════════════════════
-void onWebSocketEvent(WStype_t type, uint8_t *payload, size_t length) {
-  switch (type) {
+// ================= STATE =================
+enum SystemState { SYS_INIT, SYS_WIFI, SYS_WS, SYS_RUNNING, SYS_ERROR };
+enum AppState { NORMAL, WARNING, ALARM, ERROR_STATE };
 
-    case WStype_CONNECTED:
-      Serial.println("[WS] Da ket noi toi Server!");
+SystemState sysState = SYS_INIT;
+AppState appState = NORMAL;
+AppState lastState = NORMAL;
+
+// ================= DATA =================
+float temp = 0, humi = 0;
+bool errorSensor = false;
+int errorSensorCount = 0;
+
+// ================= CONTROL =================
+bool buzzerOn = false;
+unsigned long buzzer_time = 0;
+
+// ================= TIMER =================
+unsigned long lastSensor = 0;
+unsigned long lastLCD = 0;
+unsigned long lastReconnectWiFi = 0;
+unsigned long lastReconnectWS = 0;
+unsigned long lastSend = 0;
+unsigned long lastHeartbeat = 0;
+
+// ================= WS =================
+bool wsConnected = false;
+
+// ================= QUEUE =================
+struct Message {
+  int id;
+  String data;
+};
+
+#define MAX_QUEUE 5
+Message queue[MAX_QUEUE];
+int queueSize = 0;
+
+int currentMsgId = 0;
+bool waitingAck = false;
+unsigned long sendTime = 0;
+
+// ================= LOG =================
+const char* appStateName(AppState state) {
+  switch(state) {
+    case NORMAL: return "NORMAL";
+    case WARNING: return "WARNING";
+    case ALARM: return "ALARM";
+    case ERROR_STATE: return "ERROR";
+  }
+
+  return "UNKNOWN";
+}
+
+const char* systemStateName(SystemState state) {
+  switch(state) {
+    case SYS_INIT: return "INIT";
+    case SYS_WIFI: return "WAIT_WIFI";
+    case SYS_WS: return "WAIT_WS";
+    case SYS_RUNNING: return "RUNNING";
+    case SYS_ERROR: return "ERROR";
+  }
+
+  return "UNKNOWN";
+}
+
+void logLine(const char* tag, const String& message) {
+  Serial.print('[');
+  Serial.print(millis());
+  Serial.print(" ms]");
+  Serial.print('[');
+  Serial.print(tag);
+  Serial.print("] ");
+  Serial.println(message);
+}
+
+// ================= WIFI =================
+void connectWiFi() {
+  logLine("WIFI", "Connecting to SSID: " + String(ssid));
+  WiFi.begin(ssid, password);
+}
+
+// ================= SYSTEM STATE =================
+void updateSystemState() {
+  SystemState previousState = sysState;
+
+  switch(sysState) {
+    case SYS_INIT:
+      sysState = SYS_WIFI;
       break;
 
-    case WStype_DISCONNECTED:
-      Serial.println("[WS] Mat ket noi. Dang thu ket noi lai...");
+    case SYS_WIFI:
+      if(WiFi.status() == WL_CONNECTED)
+        sysState = SYS_WS;
       break;
 
-    case WStype_TEXT: {
-      // Phân tích JSON nhận được từ server
-      StaticJsonDocument<128> doc;
-      DeserializationError err = deserializeJson(doc, payload, length);
-      if (err) {
-        Serial.print("[WS] Lỗi parse JSON: ");
-        Serial.println(err.c_str());
-        break;
-      }
+    case SYS_WS:
+      if(wsConnected)
+        sysState = SYS_RUNNING;
+      break;
 
-      const char *type_str = doc["type"];
-      if (strcmp(type_str, "motor") == 0) {
-        const char *state = doc["state"];
-        if (strcmp(state, "ON") == 0) {
-          motorState = true;
-          digitalWrite(MOTOR_PIN, HIGH);
-          Serial.println("[MOTOR] Bat dong co");
-        } else {
-          motorState = false;
-          digitalWrite(MOTOR_PIN, LOW);
-          Serial.println("[MOTOR] Tat dong co");
+    case SYS_RUNNING:
+      if(WiFi.status() != WL_CONNECTED)
+        sysState = SYS_ERROR;
+      break;
+
+    case SYS_ERROR:
+      break;
+  }
+
+  if(sysState != previousState) {
+    logLine("SYSTEM", String(systemStateName(previousState)) + " -> " + systemStateName(sysState));
+  }
+}
+
+// ================= HANDLE SYSTEM =================
+void handleSystemState() {
+
+  switch(sysState) {
+
+    case SYS_WIFI:
+      if (WiFi.status() != WL_CONNECTED) {
+        if (millis() - lastReconnectWiFi > 5000) {
+          lastReconnectWiFi = millis();
+          connectWiFi();
         }
       }
       break;
+
+    case SYS_WS:
+      if (!wsConnected) {
+        if (millis() - lastReconnectWS > 5000) {
+          lastReconnectWS = millis();
+          logLine("WS", "Opening socket to " + String(host) + ":" + String(port));
+          webSocket.begin(host, port, "/");
+          webSocket.onEvent(webSocketEvent);
+        }
+      }
+      break;
+
+    case SYS_ERROR:
+      if (millis() - lastReconnectWiFi > 5000) {
+        lastReconnectWiFi = millis();
+        connectWiFi();
+      }
+      break;
+  }
+}
+
+// ================= WS EVENT =================
+void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
+
+  switch(type) {
+    case WStype_CONNECTED:
+      logLine("WS", "Connected to " + String(host) + ":" + String(port));
+      wsConnected = true;
+      break;
+
+    case WStype_DISCONNECTED:
+      logLine("WS", "Disconnected");
+      wsConnected = false;
+      break;
+
+    case WStype_TEXT: {
+      String msg = String((char*)payload);
+
+      logLine("WS RX", msg);
+
+      if((msg == "ACK" || msg.startsWith("{\"ack\":")) && waitingAck) {
+        waitingAck = false;
+        int ackedId = queue[0].id;
+        removeQueue();
+        logLine("ACK", "Confirmed message id=" + String(ackedId) + ", pending=" + String(queueSize));
+      }
+      break;
     }
+  }
+}
 
-    case WStype_ERROR:
-      Serial.println("[WS] Lỗi WebSocket!");
+// ================= SENSOR =================
+void readSensor() {
+  float t = dht.readTemperature();
+  float h = dht.readHumidity();
+
+  if (isnan(t) || isnan(h)) {
+    delay(50);
+    t = dht.readTemperature();
+    h = dht.readHumidity();
+  }
+
+  if (isnan(t) || isnan(h)) {
+    errorSensorCount++;
+    if(errorSensorCount >= 5) errorSensor = true;
+    logLine("SENSOR", "Read failed, retryCount=" + String(errorSensorCount));
+    return;
+  }
+
+  temp = t;
+  humi = h;
+  errorSensor = false;
+  errorSensorCount = 0;
+
+  logLine("SENSOR", "temp=" + String(temp, 1) + "C, humi=" + String(humi, 1) + "%");
+}
+
+// ================= APP STATE =================
+void updateAppState() {
+  if(errorSensor) appState = ERROR_STATE;
+  else if(temp > TEMP_ALARM || humi > HUMI_ALARM) appState = ALARM;
+  else if(temp > TEMP_LIMIT || humi > HUMI_LIMIT) appState = WARNING;
+  else appState = NORMAL;
+}
+
+// ================= CONTROL =================
+void handleAppState() {
+
+  switch(appState) {
+
+    case NORMAL:
+      digitalWrite(RELAY_PIN, LOW);
+      buzzerOn = false;
+      digitalWrite(BUZZER_PIN, BUZZER_OFF);
       break;
 
-    default:
+    case WARNING:
+      digitalWrite(RELAY_PIN, HIGH);
+      buzzerOn = false;
+      digitalWrite(BUZZER_PIN, BUZZER_OFF);
+      break;
+
+    case ALARM:
+      digitalWrite(RELAY_PIN, HIGH);
+      if(millis() - buzzer_time > 500) {
+        buzzer_time = millis();
+        buzzerOn = !buzzerOn;
+        digitalWrite(BUZZER_PIN, buzzerOn ? BUZZER_ON : BUZZER_OFF);
+      }
+      break;
+
+    case ERROR_STATE:
+      digitalWrite(RELAY_PIN, HIGH);
+      digitalWrite(BUZZER_PIN, BUZZER_ON);
       break;
   }
 }
 
-// ═══════════════════════════════════════════════════════════
-//  Kết nối WiFi
-// ═══════════════════════════════════════════════════════════
-void connectWiFi() {
-  Serial.print("[WiFi] Đang kết nối tới ");
-  Serial.print(WIFI_SSID);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
+// ================= EVENT =================
+void pushEvent(String event) {
+  if(queueSize < MAX_QUEUE) {
+
+    String data = "{";
+    data += "\"event\":\"" + event + "\"";
+    data += "}";
+
+    queue[queueSize].id = currentMsgId++;
+    queue[queueSize].data = data;
+    queueSize++;
+
+    logLine("QUEUE", "Push id=" + String(queue[queueSize - 1].id) + ", size=" + String(queueSize) + ", data=" + data);
+  } else {
+    logLine("QUEUE", "Drop event=" + event + " because queue is full");
   }
-  Serial.println();
-  Serial.print("[WiFi] Da ket noi! IP: ");
-  Serial.println(WiFi.localIP());
 }
 
-// ═══════════════════════════════════════════════════════════
-//  setup()
-// ═══════════════════════════════════════════════════════════
+void removeQueue() {
+  if(queueSize <= 0) return;
+
+  for(int i=1;i<queueSize;i++) {
+    queue[i-1] = queue[i];
+  }
+
+  queueSize--;
+  logLine("QUEUE", "Pop success, pending=" + String(queueSize));
+}
+
+// ================= SEND EVENT =================
+void sendMessage(Message msg) {
+  if(!wsConnected) return;
+
+  String packet = "{";
+  packet += "\"id\":" + String(msg.id) + ",";
+  packet += "\"data\":" + msg.data;
+  packet += "}";
+
+  webSocket.sendTXT(packet);
+
+  logLine("WS TX", "id=" + String(msg.id) + ", payload=" + packet);
+
+  waitingAck = true;
+  sendTime = millis();
+}
+
+void processQueue() {
+  if(queueSize <= 0) return;
+
+  if(!waitingAck) {
+    sendMessage(queue[0]);
+  }
+}
+
+void checkTimeout() {
+  if(queueSize <= 0) return;
+
+  if(waitingAck && millis() - sendTime > 3000) {
+    logLine("RESEND", "Timeout for id=" + String(queue[0].id) + ", retrying");
+    sendMessage(queue[0]);
+  }
+}
+
+// ================= REALTIME =================
+void sendRealtime() {
+  if(wsConnected && millis() - lastSend > 3000) {
+    lastSend = millis();
+
+    String data = "{";
+    data += "\"temp\":" + String(temp) + ",";
+    data += "\"humi\":" + String(humi) + ",";
+    data += "\"fan\":" + String(digitalRead(RELAY_PIN)) + ",";
+    data += "\"alarm\":" + String(appState == ALARM) + ",";
+    data += "\"error\":" + String(appState == ERROR_STATE) + ",";
+    data += "\"app_state\":\"" + String(appStateName(appState)) + "\",";
+    data += "\"system_state\":\"" + String(systemStateName(sysState)) + "\"";
+    data += "}";
+
+    webSocket.sendTXT(data);
+
+    logLine("REALTIME", data);
+  }
+}
+
+// ================= HEARTBEAT =================
+void heartbeat() {
+  if(millis() - lastHeartbeat > 10000) {
+    lastHeartbeat = millis();
+    webSocket.sendTXT("{\"topic\":\"ping\"}");
+    logLine("PING", "Heartbeat sent");
+  }
+}
+
+// ================= LCD =================
+char line1[17];
+char line2[17];
+
+void displayLCD() {
+
+  snprintf(line1, sizeof(line1), "T:%5.1fC", temp);
+  snprintf(line2, sizeof(line2), "H:%5.1f%%", humi);
+
+  lcd.setCursor(0,0);
+  lcd.print(line1);
+
+  lcd.setCursor(0,1);
+
+  switch(appState) {
+    case NORMAL: lcd.print(line2); lcd.print(" NOR"); break;
+    case WARNING: lcd.print(line2); lcd.print(" WAR"); break;
+    case ALARM: lcd.print(line2); lcd.print(" ALM"); break;
+    case ERROR_STATE: lcd.print("SENSOR ERROR   "); break;
+  }
+}
+
+// ================= SETUP =================
 void setup() {
   Serial.begin(115200);
-  pinMode(MOTOR_PIN, OUTPUT);
-  digitalWrite(MOTOR_PIN, LOW);   // Motor OFF khi khởi động
+
+  Wire.begin(21,22);
+
+  pinMode(RELAY_PIN, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+
+  digitalWrite(RELAY_PIN, LOW);
+  digitalWrite(BUZZER_PIN, BUZZER_OFF);
+
+  lcd.init();
+  lcd.backlight();
 
   dht.begin();
-  connectWiFi();
 
-  // Cấu hình WebSocket client
-  // Nếu server có SSL (wss://): dùng wsClient.beginSSL(...)
-  wsClient.begin(SERVER_HOST, SERVER_PORT, SERVER_PATH);
-  wsClient.onEvent(onWebSocketEvent);
-  wsClient.setReconnectInterval(5000);   // Tự reconnect sau 5 giây
+  logLine("BOOT", "System starting");
+  connectWiFi();
 }
 
-// ═══════════════════════════════════════════════════════════
-//  loop()
-// ═══════════════════════════════════════════════════════════
+// ================= LOOP =================
 void loop() {
-  wsClient.loop();   // Xử lý sự kiện WebSocket - PHẢI gọi mỗi vòng lặp
 
-  unsigned long now = millis();
-  if (now - lastSendTime >= SEND_INTERVAL) {
-    lastSendTime = now;
+  webSocket.loop();
 
-    // Đọc cảm biến DHT22
-    float humidity    = dht.readHumidity();
-    float temperature = dht.readTemperature();   // Celsius
+  updateSystemState();
+  handleSystemState();
 
-    if (isnan(humidity) || isnan(temperature)) {
-      Serial.println("[DHT22] Loi doc cam bien!");
-      return;
+  if(millis() - lastSensor > 2000) {
+    lastSensor = millis();
+    readSensor();
+    updateAppState();
+  }
+
+  handleAppState();
+
+  if(appState != lastState) {
+    logLine("STATE", String(appStateName(lastState)) + " -> " + appStateName(appState));
+
+    if(appState == ALARM) {
+      buzzerOn = true;
+      buzzer_time = millis();
+      digitalWrite(BUZZER_PIN, BUZZER_ON);
     }
 
-    // Dong goi JSON va gui qua WebSocket
-    StaticJsonDocument<128> doc;
-    doc["type"]     = "sensor";
-    doc["temp"]     = temperature;
-    doc["humidity"] = humidity;
+    if(appState == ALARM) pushEvent("ALARM_ON");
+    if(appState == NORMAL) pushEvent("NORMAL");
+    if(appState == WARNING) pushEvent("WARNING");
+    if(appState == ERROR_STATE) pushEvent("ERROR");
 
-    String output;
-    serializeJson(doc, output);
-    wsClient.sendTXT(output);
-
-    Serial.print("[DHT22] Gui: ");
-    Serial.println(output);
+    lastState = appState;
   }
+
+  if(millis() - lastLCD > 1000) {
+    lastLCD = millis();
+    displayLCD();
+  }
+
+  sendRealtime();
+  processQueue();
+  checkTimeout();
+  heartbeat();
 }

@@ -1,110 +1,141 @@
-/**
- * public/app.js
- * WebSocket client cho Dashboard (FE)
- * Kết nối tới ws://<host>/fe
- */
+// public/app.js – WebSocket client cho Dashboard
+// Kết nối: ws://<host>/fe
+//
+// Nhận từ server:
+//   { type: "sensor_update", temp, humi, fan, alarm, error, app_state, system_state, timestamp }
+//   { type: "fan_state",     state: "ON"|"OFF" }
+//   { type: "event",         event: "ALARM_ON"|"NORMAL"|... }
+//   { type: "esp_status",    connected: bool }
+//
+// Gửi lên server:
+//   { type: "fan", state: "ON"|"OFF" }
+//   { type: "buzzer_off" }
 
 const WS_URL = `ws://${location.host}/fe`;
 let ws = null;
 let reconnectTimer = null;
 
-// ── DOM references ────────────────────────────────────────────────────────────
-const wsDot        = document.getElementById('ws-dot');
-const wsStatus     = document.getElementById('ws-status');
-const espDot       = document.getElementById('esp-dot');
-const espStatus    = document.getElementById('esp-status');
-const tempVal      = document.getElementById('temp-val');
-const humidVal     = document.getElementById('humid-val');
-const motorText    = document.getElementById('motor-state-text');
-const logBox       = document.getElementById('log-box');
+// ── DOM ──────────────────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const wsDot       = $('ws-dot');
+const wsStatus    = $('ws-status');
+const espDot      = $('esp-dot');
+const espStatus   = $('esp-status');
+const tempVal     = $('temp-val');
+const humiVal     = $('humi-val');
+const appStateBadge = $('app-state-badge');
+const fanText     = $('fan-state-text');
+const logBox      = $('log-box');
 
-// ── Logging ───────────────────────────────────────────────────────────────────
+// ── Log ─────────────────────────────────────────────────────────────────────
 function log(msg, type = 'info') {
   const p = document.createElement('p');
-  const time = new Date().toLocaleTimeString('vi-VN');
   p.className = `log-${type}`;
-  p.textContent = `[${time}] ${msg}`;
+  p.textContent = `[${new Date().toLocaleTimeString('vi-VN')}] ${msg}`;
   logBox.prepend(p);
-  // Giới hạn 50 dòng log
-  while (logBox.children.length > 50) logBox.removeChild(logBox.lastChild);
+  if (logBox.children.length > 60) logBox.removeChild(logBox.lastChild);
 }
 
-// ── UI Update ─────────────────────────────────────────────────────────────────
-function updateMotorUI(state) {
-  motorText.textContent = state;
-  motorText.className = `motor-state ${state === 'ON' ? 'on' : 'off'}`;
+// ── UI ───────────────────────────────────────────────────────────────────────
+const STATE_CLASS = {
+  NORMAL:      'badge-normal',
+  WARNING:     'badge-warning',
+  ALARM:       'badge-alarm',
+  ERROR_STATE: 'badge-error',
+  ERROR:       'badge-error',
+};
+
+function updateSensor(data) {
+  tempVal.innerHTML = `${data.temp}<span class="card-unit">°C</span>`;
+  humiVal.innerHTML = `${data.humi}<span class="card-unit">%</span>`;
+
+  const state = data.app_state || 'NORMAL';
+  appStateBadge.textContent = state;
+  appStateBadge.className   = `badge ${STATE_CLASS[state] || 'badge-normal'}`;
 }
 
-function updateESPStatus(connected) {
-  espDot.className = connected ? 'dot connected' : 'dot';
+function updateFan(state) {
+  fanText.textContent = state;
+  fanText.className   = state === 'ON' ? 'on' : 'off';
+}
+
+function updateESP(connected) {
+  espDot.className   = connected ? 'dot on' : 'dot';
   espStatus.textContent = connected ? 'ESP đã kết nối' : 'ESP chưa kết nối';
 }
 
-// ── WebSocket ─────────────────────────────────────────────────────────────────
+// ── WebSocket ────────────────────────────────────────────────────────────────
 function connect() {
   clearTimeout(reconnectTimer);
-  log(`Đang kết nối tới server...`, 'info');
   ws = new WebSocket(WS_URL);
 
   ws.onopen = () => {
-    wsDot.className = 'dot connected';
-    wsStatus.textContent = 'WebSocket đã kết nối';
-    log('✅ Kết nối server thành công!', 'ok');
+    wsDot.className   = 'dot on';
+    wsStatus.textContent = 'Đã kết nối server';
+    log('✅ Kết nối server thành công', 'ok');
   };
 
   ws.onclose = () => {
-    wsDot.className = 'dot';
-    wsStatus.textContent = 'Mất kết nối, đang thử lại...';
-    log('❌ Mất kết nối. Thử lại sau 5 giây...', 'warn');
+    wsDot.className   = 'dot';
+    wsStatus.textContent = 'Mất kết nối, thử lại sau 5s...';
+    log('❌ Mất kết nối server', 'warn');
     reconnectTimer = setTimeout(connect, 5000);
   };
 
-  ws.onerror = (e) => {
-    log('Lỗi WebSocket: ' + (e.message || 'unknown'), 'warn');
-  };
+  ws.onerror = () => log('⚠️ Lỗi WebSocket', 'warn');
 
-  ws.onmessage = (event) => {
+  ws.onmessage = ({ data }) => {
     try {
-      const msg = JSON.parse(event.data);
+      const msg = JSON.parse(data);
 
-      if (msg.type === 'sensor_update') {
-        tempVal.innerHTML  = `${msg.temp}<span class="card-unit">C</span>`;
-        humidVal.innerHTML = `${msg.humidity}<span class="card-unit">%</span>`;
-        log(`Sensor: ${msg.temp}C | ${msg.humidity}%`, 'info');
+      switch (msg.type) {
 
-      } else if (msg.type === 'motor_state') {
-        updateMotorUI(msg.state);
-        updateESPStatus(msg.esp_connected);
-        log(`Motor: ${msg.state} | ESP: ${msg.esp_connected ? 'online' : 'offline'}`, 'ok');
+        case 'sensor_update':
+          updateSensor(msg);
+          log(`🌡 ${msg.temp}°C | 💧 ${msg.humi}% | Quạt: ${msg.fan ? 'ON' : 'OFF'} | ${msg.app_state}`, 'info');
+          break;
 
-      } else if (msg.type === 'esp_status') {
-        updateESPStatus(msg.connected);
-        log(`ESP ${msg.connected ? 'da ket noi' : 'da ngat ket noi'}`, msg.connected ? 'ok' : 'warn');
+        case 'fan_state':
+          updateFan(msg.state);
+          log(`🌀 Quạt: ${msg.state}`, 'ok');
+          break;
+
+        case 'event':
+          log(`🔔 Sự kiện: ${msg.event}`, msg.event === 'ALARM_ON' ? 'err' : 'warn');
+          break;
+
+        case 'esp_status':
+          updateESP(msg.connected);
+          log(`ESP ${msg.connected ? '🟢 kết nối' : '🔴 ngắt kết nối'}`, msg.connected ? 'ok' : 'warn');
+          break;
+
+        default:
+          log(`[?] Nhận: ${data}`, 'warn');
       }
-    } catch (e) {
-      log('Lỗi parse JSON: ' + e.message, 'warn');
+    } catch {
+      log('Parse lỗi: ' + data, 'warn');
     }
   };
 }
 
-// ── Điều khiển ────────────────────────────────────────────────────────────────
+// ── Gửi lệnh ────────────────────────────────────────────────────────────────
 function send(payload) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(payload));
   } else {
-    log('Chưa kết nối server, không thể gửi lệnh!', 'warn');
+    log('⚠️ Chưa kết nối server!', 'warn');
   }
 }
 
-function toggleMotor() {
-  send({ type: 'motor_toggle' });
-  log('Gui lenh: Toggle motor', 'info');
+function setFan(state) {
+  send({ type: 'fan', state });
+  log(`📤 Gửi: Quạt ${state}`, 'info');
 }
 
-function setMotor(state) {
-  send({ type: 'motor_cmd', state });
-  log(`Gui lenh: Motor ${state}`, 'info');
+function buzzerOff() {
+  send({ type: 'buzzer_off' });
+  log('📤 Gửi: Tắt còi', 'info');
 }
 
-// ── Khởi động ─────────────────────────────────────────────────────────────────
+// ── Khởi động ────────────────────────────────────────────────────────────────
 connect();

@@ -1,222 +1,137 @@
-/**
- * server.js
- * Node.js WebSocket Server cho hệ thống IoT DHT22 + điều khiển động cơ.
- *
- * Cổng:
- *   - ws://localhost:3000/esp  -> Dành riêng cho ESP kết nối
- *   - ws://localhost:3000/fe   -> Dành cho Frontend/Dashboard
- *   - http://localhost:3000    -> Phục vụ giao diện web tĩnh
- *
- * Giao thức JSON (ESP -> Server):
- *   { "type": "sensor", "temp": 28.5, "humidity": 65.2 }
- *
- * Giao thức JSON (Server -> ESP):
- *   { "type": "motor", "state": "ON" }   hoặc "OFF"
- *
- * Giao thức JSON (FE -> Server):
- *   { "type": "motor_cmd", "state": "ON" }  hoặc "OFF"
- *   { "type": "motor_toggle" }
- *
- * Giao thức JSON (Server -> FE):
- *   { "type": "sensor_update", "temp": 28.5, "humidity": 65.2, "timestamp": "..." }
- *   { "type": "motor_state",   "state": "ON", "esp_connected": true }
- *   { "type": "esp_status",    "connected": true/false }
- */
+// server.js – WebSocket server IoT DHT22
+//
+// Kết nối:
+//   ws://HOST:3000/esp  → ESP32
+//   ws://HOST:3000/fe   → Frontend (nhiều client)
+//   http://HOST:3000    → Web UI tĩnh (public/)
+//
+// FE -> Server:
+//   { type: "fan", state: "ON"|"OFF" }    – bật/tắt quạt
+//   { type: "buzzer_off" }                 – tắt còi
+//
+// Server -> FE:
+//   { type: "sensor_update", temp, humi, fan, alarm, error, app_state, system_state, timestamp }
+//   { type: "event", event: "ALARM_ON"|"NORMAL"|... }
+//   { type: "fan_state", state: "ON"|"OFF" }
+//   { type: "esp_status", connected: bool }
 
 const http = require('http');
-const fs = require('fs');
+const fs   = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
-
-const espHandler = require('./esp-handler');
+const esp  = require('./esp-handler');
 
 const PORT = process.env.PORT || 3000;
 
-// ─── HTTP Server (phục vụ file tĩnh) ──────────────────────────────────────────
+// ── HTTP: phục vụ file tĩnh ─────────────────────────────────────────────────
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.css':  'text/css',
+  '.js':   'application/javascript',
+};
+
 const httpServer = http.createServer((req, res) => {
-  // Chỉ phục vụ trang giao diện điều khiển
-  const filePath = path.join(__dirname, 'public', 'index.html');
-  if (req.url === '/' || req.url === '/index.html') {
-    fs.readFile(filePath, (err, data) => {
-      if (err) {
-        res.writeHead(404);
-        res.end('Không tìm thấy trang. Hãy tạo file public/index.html');
-        return;
-      }
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(data);
-    });
-  } else if (req.url === '/style.css') {
-    const cssPath = path.join(__dirname, 'public', 'style.css');
-    fs.readFile(cssPath, (err, data) => {
-      if (err) { res.writeHead(404); res.end(); return; }
-      res.writeHead(200, { 'Content-Type': 'text/css' });
-      res.end(data);
-    });
-  } else if (req.url === '/app.js') {
-    const jsPath = path.join(__dirname, 'public', 'app.js');
-    fs.readFile(jsPath, (err, data) => {
-      if (err) { res.writeHead(404); res.end(); return; }
-      res.writeHead(200, { 'Content-Type': 'application/javascript' });
-      res.end(data);
-    });
-  } else {
-    res.writeHead(404);
-    res.end('Not Found');
-  }
+  const url  = req.url === '/' ? '/index.html' : req.url;
+  const file = path.join(__dirname, 'public', url);
+  const ext  = path.extname(file);
+
+  fs.readFile(file, (err, data) => {
+    if (err) { res.writeHead(404); res.end('Not Found'); return; }
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'text/plain' });
+    res.end(data);
+  });
 });
 
-// ─── WebSocket Server ──────────────────────────────────────────────────────────
-// Dùng chung 1 WSS, phân loại client bằng URL path
-const wss = new WebSocketServer({ server: httpServer });
-
-// Lưu tập hợp các FE client đang kết nối
+// ── WebSocket ────────────────────────────────────────────────────────────────
+const wss       = new WebSocketServer({ server: httpServer });
 const feClients = new Set();
 
-/**
- * Phát dữ liệu đến tất cả FE client đang mở.
- * @param {object} payload
- */
-function broadcastToFE(payload) {
+function broadcast(payload) {
   const msg = JSON.stringify(payload);
-  for (const client of feClients) {
-    if (client.readyState === 1 /* OPEN */) {
-      client.send(msg);
-    }
-  }
+  for (const ws of feClients)
+    if (ws.readyState === 1) ws.send(msg);
 }
 
 wss.on('connection', (ws, req) => {
-  const urlPath = req.url || '/';
+  const url = req.url;
 
-  // ── Xử lý kết nối từ ESP ──────────────────────────────────────────────────
-  if (urlPath === '/esp') {
-    espHandler.registerESP(ws);
+  // ─ ESP ────────────────────────────────────────────────────────────────────
+  if (url === '/esp') {
+    esp.registerESP(ws);
+    broadcast({ type: 'esp_status', connected: true });
 
-    // Thông báo cho tất cả FE rằng ESP đã kết nối
-    broadcastToFE({
-      type: 'esp_status',
-      connected: true,
-      timestamp: new Date().toISOString(),
-    });
+    ws.on('message', raw => {
+      const result = esp.handleESPMessage(raw.toString());
+      if (!result) return;
 
-    ws.on('message', (rawMsg) => {
-      const sensorData = espHandler.handleESPMessage(rawMsg.toString());
-      if (sensorData) {
-        // Chuyển tiếp dữ liệu cảm biến đến tất cả FE
-        broadcastToFE({
-          type: 'sensor_update',
-          temp: sensorData.temp,
-          humidity: sensorData.humidity,
-          timestamp: sensorData.timestamp,
-        });
+      if (result.type === 'sensor') {
+        broadcast({ type: 'sensor_update', ...result.data });
+      } else if (result.type === 'event') {
+        broadcast({ type: 'event', event: result.event });
       }
     });
 
     ws.on('close', () => {
-      espHandler.unregisterESP();
-      broadcastToFE({
-        type: 'esp_status',
-        connected: false,
-        timestamp: new Date().toISOString(),
-      });
+      esp.unregisterESP();
+      broadcast({ type: 'esp_status', connected: false });
     });
 
-    ws.on('error', (err) => {
-      console.error('[SERVER] Lỗi WebSocket ESP:', err.message);
-    });
-
-    return; // Kết thúc xử lý cho ESP
+    ws.on('error', err => console.error('[ESP]', err.message));
+    return;
   }
 
-  // ── Xử lý kết nối từ Frontend ─────────────────────────────────────────────
-  if (urlPath === '/fe') {
+  // ─ Frontend ───────────────────────────────────────────────────────────────
+  if (url === '/fe') {
     feClients.add(ws);
-    console.log(`[SERVER] FE client kết nối. Tổng: ${feClients.size}`);
+    console.log(`[FE] Kết nối (${feClients.size} client)`);
 
     // Gửi trạng thái hiện tại ngay khi FE kết nối
-    ws.send(JSON.stringify({
-      type: 'motor_state',
-      state: espHandler.getMotorState(),
-      esp_connected: espHandler.isESPConnected(),
-    }));
+    ws.send(JSON.stringify({ type: 'esp_status', connected: esp.isConnected() }));
+    ws.send(JSON.stringify({ type: 'fan_state', state: esp.getFanState() }));
+    const last = esp.getLastData();
+    if (last) ws.send(JSON.stringify({ type: 'sensor_update', ...last }));
 
-    // Gửi dữ liệu cảm biến gần nhất nếu có
-    const lastSensor = espHandler.getLastSensorData();
-    if (lastSensor) {
-      ws.send(JSON.stringify({
-        type: 'sensor_update',
-        temp: lastSensor.temp,
-        humidity: lastSensor.humidity,
-        timestamp: lastSensor.timestamp,
-      }));
-    }
-
-    ws.on('message', (rawMsg) => {
+    ws.on('message', raw => {
       try {
-        const data = JSON.parse(rawMsg.toString());
+        const msg = JSON.parse(raw.toString());
 
-        if (data.type === 'motor_cmd') {
-          // FE yêu cầu set trạng thái cụ thể
-          const success = espHandler.sendMotorCommand(data.state);
-          console.log(`[SERVER] FE yêu cầu motor=${data.state}, gửi ESP: ${success}`);
+        if (msg.type === 'fan') {
+          esp.setFan(msg.state);
+          broadcast({ type: 'fan_state', state: esp.getFanState() });
 
-          // Phát trạng thái mới cho tất cả FE
-          broadcastToFE({
-            type: 'motor_state',
-            state: espHandler.getMotorState(),
-            esp_connected: espHandler.isESPConnected(),
-          });
-
-        } else if (data.type === 'motor_toggle') {
-          // FE yêu cầu toggle
-          const newState = espHandler.toggleMotor();
-          console.log(`[SERVER] FE toggle motor -> ${newState}`);
-
-          broadcastToFE({
-            type: 'motor_state',
-            state: newState,
-            esp_connected: espHandler.isESPConnected(),
-          });
+        } else if (msg.type === 'buzzer_off') {
+          esp.buzzerOff();
 
         } else {
-          console.warn('[SERVER] FE gửi loại lệnh không xác định:', data.type);
+          console.warn('[FE] Lệnh không xác định:', msg.type);
         }
-      } catch (err) {
-        console.error('[SERVER] Lỗi parse JSON từ FE:', err.message);
+      } catch {
+        console.error('[FE] Parse lỗi:', raw.toString());
       }
     });
 
     ws.on('close', () => {
       feClients.delete(ws);
-      console.log(`[SERVER] FE client ngắt kết nối. Còn: ${feClients.size}`);
+      console.log(`[FE] Ngắt kết nối (${feClients.size} client)`);
     });
 
-    ws.on('error', (err) => {
-      console.error('[SERVER] Lỗi WebSocket FE:', err.message);
+    ws.on('error', err => {
+      console.error('[FE]', err.message);
       feClients.delete(ws);
     });
 
     return;
   }
 
-  // ── URL không hợp lệ ───────────────────────────────────────────────────────
-  console.warn(`[SERVER] Kết nối bị từ chối từ path không hợp lệ: ${urlPath}`);
-  ws.close(1008, 'Path không hợp lệ. Dùng /esp hoặc /fe');
+  // ─ URL không hợp lệ ──────────────────────────────────────────────────────
+  ws.close(1008, 'Dùng /esp hoặc /fe');
 });
 
-// ─── Khởi động Server ─────────────────────────────────────────────────────────
+// ── Khởi động ────────────────────────────────────────────────────────────────
 httpServer.listen(PORT, () => {
-  console.log('------------------------------------------------');
-  console.log('      IoT DHT22 + Motor Control Server          ');
-  console.log('------------------------------------------------');
-  console.log(`  HTTP Dashboard : http://localhost:${PORT}       `);
-  console.log(`  ESP WebSocket  : ws://localhost:${PORT}/esp    `);
-  console.log(`  FE  WebSocket  : ws://localhost:${PORT}/fe     `);
-  console.log('------------------------------------------------');
+  console.log(`Server: http://localhost:${PORT}`);
+  console.log(`  ESP: ws://localhost:${PORT}/esp`);
+  console.log(`  FE:  ws://localhost:${PORT}/fe`);
 });
 
-httpServer.on('error', (err) => {
-  console.error('[SERVER] Lỗi HTTP Server:', err.message);
-  process.exit(1);
-});
+httpServer.on('error', err => { console.error(err.message); process.exit(1); });

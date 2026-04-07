@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>IoT Dashboard - DHT22 & Motor Control</title>
+  <title>IoT Dashboard – DHT22</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -15,14 +15,13 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
-      padding: 24px;
+      padding: 28px 16px;
       gap: 20px;
     }
 
     h1 { font-size: 1.5rem; color: #7dd3fc; letter-spacing: 0.05em; }
 
-    /* ── Status Bar ── */
+    /* ── Status bar ── */
     #status-bar {
       display: flex;
       align-items: center;
@@ -33,138 +32,167 @@
       padding: 10px 20px;
       font-size: 0.9rem;
     }
-
     .dot {
       width: 10px; height: 10px;
       border-radius: 50%;
       background: #ef4444;
       transition: background 0.3s;
     }
-    .dot.connected { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
+    .dot.on { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
 
-    /* ── Cards ── */
+    /* ── Grid cards ── */
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
       gap: 16px;
       width: 100%;
-      max-width: 720px;
+      max-width: 740px;
     }
 
     .card {
-      background: rgba(30, 41, 59, 0.8);
+      background: rgba(30,41,59,0.85);
       border: 1px solid #334155;
       border-radius: 16px;
       padding: 24px;
       text-align: center;
-      backdrop-filter: blur(8px);
     }
-
     .card-label {
-      font-size: 0.8rem;
+      font-size: 0.75rem;
       color: #94a3b8;
       text-transform: uppercase;
       letter-spacing: 0.08em;
       margin-bottom: 8px;
     }
-
     .card-value {
-      font-size: 2.4rem;
+      font-size: 2.6rem;
       font-weight: 700;
       color: #7dd3fc;
     }
+    .card-unit { font-size: 1rem; color: #64748b; margin-left: 4px; }
 
-    .card-unit {
-      font-size: 1rem;
-      color: #64748b;
-      margin-left: 4px;
-    }
-
-    /* ── Motor Control ── */
-    #motor-card { max-width: 720px; width: 100%; }
-
-    .motor-state {
-      font-size: 1.4rem;
-      font-weight: 700;
-      margin-bottom: 16px;
-    }
-    .motor-state.on  { color: #22c55e; }
-    .motor-state.off { color: #ef4444; }
-
-    .btn {
+    /* ── State badge ── */
+    .badge {
       display: inline-block;
-      padding: 12px 36px;
+      padding: 4px 14px;
+      border-radius: 20px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      margin-top: 8px;
+    }
+    .badge-normal  { background: #166534; color: #4ade80; }
+    .badge-warning { background: #713f12; color: #fbbf24; }
+    .badge-alarm   { background: #7f1d1d; color: #f87171; }
+    .badge-error   { background: #3b0764; color: #e879f9; }
+
+    /* ── Control card ── */
+    #ctrl-card {
+      width: 100%;
+      max-width: 740px;
+      background: rgba(30,41,59,0.85);
+      border: 1px solid #334155;
+      border-radius: 16px;
+      padding: 24px;
+    }
+    #ctrl-card h2 { font-size: 0.8rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 16px; }
+
+    .ctrl-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+    .ctrl-label { font-size: 0.9rem; color: #cbd5e1; min-width: 80px; }
+
+    /* Fan state display */
+    #fan-state-text {
+      font-size: 1.2rem;
+      font-weight: 700;
+      min-width: 50px;
+    }
+    #fan-state-text.on  { color: #22c55e; }
+    #fan-state-text.off { color: #ef4444; }
+
+    /* Buttons */
+    .btn {
+      padding: 10px 28px;
       border: none;
       border-radius: 10px;
-      font-size: 1rem;
+      font-size: 0.95rem;
       font-weight: 600;
       cursor: pointer;
       transition: all 0.2s ease;
-      margin: 6px;
     }
-    .btn-toggle {
-      background: linear-gradient(135deg, #3b82f6, #7c3aed);
-      color: #fff;
-    }
-    .btn-toggle:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(99,102,241,0.4); }
+    .btn:hover { transform: translateY(-2px); }
     .btn-on  { background: #16a34a; color: #fff; }
-    .btn-off { background: #dc2626; color: #fff; }
     .btn-on:hover  { background: #15803d; }
+    .btn-off { background: #dc2626; color: #fff; }
     .btn-off:hover { background: #b91c1c; }
+    .btn-buzzer { background: linear-gradient(135deg, #7c3aed, #db2777); color: #fff; }
+    .btn-buzzer:hover { box-shadow: 0 6px 20px rgba(167,139,250,0.4); }
 
-    /* ── Log ── */
+    /* ── Log box ── */
     #log-box {
       width: 100%;
-      max-width: 720px;
+      max-width: 740px;
       background: #0f172a;
       border: 1px solid #1e3a5f;
       border-radius: 12px;
       padding: 12px;
       height: 160px;
       overflow-y: auto;
-      font-family: 'Cascadia Code', 'Consolas', monospace;
+      font-family: 'Consolas', monospace;
       font-size: 0.78rem;
       color: #94a3b8;
     }
-
     #log-box p { padding: 2px 0; border-bottom: 1px solid #1e293b; }
     #log-box p:last-child { border-bottom: none; }
-    .log-info  { color: #7dd3fc; }
-    .log-warn  { color: #fbbf24; }
-    .log-ok    { color: #4ade80; }
+    .log-info { color: #7dd3fc; }
+    .log-warn { color: #fbbf24; }
+    .log-ok   { color: #4ade80; }
+    .log-err  { color: #f87171; }
   </style>
 </head>
 <body>
-  <h1>IoT Dashboard - DHT22 & Motor Control</h1>
 
-  <!-- Trang thai ket noi -->
+  <h1>🌡️ IoT Dashboard – DHT22</h1>
+
+  <!-- Trạng thái kết nối -->
   <div id="status-bar">
     <div class="dot" id="ws-dot"></div>
-    <span id="ws-status">Dang ket noi WebSocket...</span>
+    <span id="ws-status">Đang kết nối WebSocket...</span>
     &nbsp;|&nbsp;
     <div class="dot" id="esp-dot"></div>
-    <span id="esp-status">ESP chua ket noi</span>
+    <span id="esp-status">ESP chưa kết nối</span>
   </div>
 
-  <!-- Du lieu cam bien -->
+  <!-- Dữ liệu cảm biến -->
   <div class="grid">
     <div class="card">
-      <div class="card-label">Nhiet do</div>
-      <div class="card-value" id="temp-val">--<span class="card-unit">C</span></div>
+      <div class="card-label">Nhiệt độ</div>
+      <div class="card-value" id="temp-val">--<span class="card-unit">°C</span></div>
     </div>
     <div class="card">
-      <div class="card-label">Do am</div>
-      <div class="card-value" id="humid-val">--<span class="card-unit">%</span></div>
+      <div class="card-label">Độ ẩm</div>
+      <div class="card-value" id="humi-val">--<span class="card-unit">%</span></div>
+    </div>
+    <div class="card">
+      <div class="card-label">Trạng thái</div>
+      <div id="app-state-badge" class="badge badge-normal">NORMAL</div>
     </div>
   </div>
 
-  <!-- Dieu khien dong co -->
-  <div class="card" id="motor-card">
-    <div class="card-label">Trang thai Dong co</div>
-    <div class="motor-state off" id="motor-state-text">OFF</div>
-    <button class="btn btn-toggle" id="btn-toggle" onclick="toggleMotor()">Toggle</button>
-    <button class="btn btn-on"     id="btn-on"     onclick="setMotor('ON')">Bat</button>
-    <button class="btn btn-off"    id="btn-off"    onclick="setMotor('OFF')">Tat</button>
+  <!-- Điều khiển -->
+  <div id="ctrl-card">
+    <h2>Điều khiển</h2>
+
+    <!-- Quạt -->
+    <div class="ctrl-row">
+      <span class="ctrl-label">🌀 Quạt</span>
+      <span id="fan-state-text" class="off">OFF</span>
+      <button class="btn btn-on"  id="btn-fan-on"  onclick="setFan('ON')">Bật</button>
+      <button class="btn btn-off" id="btn-fan-off" onclick="setFan('OFF')">Tắt</button>
+    </div>
+
+    <!-- Còi -->
+    <div class="ctrl-row">
+      <span class="ctrl-label">🔔 Còi</span>
+      <button class="btn btn-buzzer" id="btn-buzzer-off" onclick="buzzerOff()">Tắt còi</button>
+    </div>
   </div>
 
   <!-- Log -->
