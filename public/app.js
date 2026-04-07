@@ -46,7 +46,8 @@ ws.onmessage = (event) => {
 
     switch (msg.type) {
       case 'sensor_update':
-        if (msg.error) {
+        console.log('sensor_update:', msg);
+        if (msg.app_state == "ERROR") {
           tempValueEl.textContent = '--';
           humidityValueEl.textContent = '--';
         } else {
