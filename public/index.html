@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard VDK</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+  <main class="content">
+    <header class="topbar" style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+      <div>
+        <h1 class="topbar-title">Dashboard</h1>
+        <p class="topbar-subtitle">Giám sát nhiệt độ, độ ẩm không khí và điều khiển quạt, còi</p>
+      </div>
+      <div>
+        <span id="wsStatusBadge" style="padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: bold; background: #f1f5f9; color: #64748b; white-space: nowrap;">
+          <i class="fa-solid fa-spinner fa-spin"></i> Đang kết nối...
+        </span>
+      </div>
+    </header>
+
+    <section class="page">
+      <section class="sensor-grid">
+        <article class="sensor-card temp">
+          <div class="sensor-top">
+            <div>
+              <div class="sensor-label">Nhiệt độ</div>
+              <div class="sensor-value" id="tempValue">-- °C</div>
+              <div class="sensor-subtext">Giá trị nhiệt độ hiện tại.</div>
+            </div>
+            <div class="sensor-badge temp"><i class="fa-solid fa-temperature-half"></i></div>
+          </div>
+        </article>
+
+        <article class="sensor-card humidity">
+          <div class="sensor-top">
+            <div>
+              <div class="sensor-label">Độ ẩm không khí</div>
+              <div class="sensor-value" id="humidityValue">-- %</div>
+              <div class="sensor-subtext">Giá trị độ ẩm không khí hiện tại.</div>
+            </div>
+            <div class="sensor-badge humidity"><i class="fa-solid fa-droplet"></i></div>
+          </div>
+        </article>
+
+        <article class="sensor-card status">
+          <div class="sensor-top">
+            <div>
+              <div class="sensor-label">Trạng thái ESP</div>
+              <div class="sensor-value" id="espStatusValue" style="font-size: 28px;">Đang tải...</div>
+              <div class="sensor-subtext" id="appStateValue">Trạng thái: chờ kết nối</div>
+            </div>
+            <div class="sensor-badge status"><i class="fa-solid fa-microchip"></i></div>
+          </div>
+        </article>
+      </section>
+
+      <section class="bottom-row">
+        <div class="charts-inline">
+          <article class="chart-card">
+            <div class="card-head">
+              <div>
+                <h3 class="card-title">Biểu đồ nhiệt độ</h3>
+              </div>
+            </div>
+            <div class="chart-shell">
+              <canvas id="tempChart"></canvas>
+            </div>
+          </article>
+
+          <article class="chart-card">
+            <div class="card-head">
+              <div>
+                <h3 class="card-title">Biểu đồ độ ẩm không khí</h3>
+              </div>
+            </div>
+            <div class="chart-shell">
+              <canvas id="humidityChart"></canvas>
+            </div>
+          </article>
+        </div>
+
+        <article class="device-card device-card-compact">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title">Điều khiển thiết bị</h3>
+              <p class="card-subtitle">Quạt và còi cảnh báo</p>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span id="modeLabel" style="font-size: 13px; font-weight: 800; color: #2563eb;">AUTO</span>
+              <label class="switch">
+                <input type="checkbox" id="modeSwitch" />
+                <span></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="device-list compact">
+            <div class="device-item">
+              <div class="device-top">
+                <div class="device-left">
+                  <div class="device-icon"><i class="fa-solid fa-fan"></i></div>
+                  <div>
+                    <div class="device-name">Quạt thông gió</div>
+                    <div class="device-desc">Điều khiển quạt làm mát.</div>
+                  </div>
+                </div>
+                <span class="status-badge on" id="fanBadge">On</span>
+              </div>
+              <div class="device-bottom">
+                <div class="device-power">Thiết bị quạt</div>
+                <label class="switch">
+                  <input type="checkbox" id="fanSwitch"/>
+                  <span></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="device-item">
+              <div class="device-top" style="margin-bottom: 8px;">
+                <div class="device-left">
+                  <div class="device-icon" style="background:rgba(239,68,68,.10); color:var(--danger);"><i
+                      class="fa-solid fa-bullhorn"></i></div>
+                  <div>
+                    <div class="device-name">Còi cảnh báo</div>
+                    <div class="device-desc">Chỉ hỗ trợ tắt còi thủ công.</div>
+                  </div>
+                </div>
+                <span class="status-badge off" id="alarmBadge">Off</span>
+              </div>
+              <div class="device-bottom" style="margin-top: 2px;">
+                <button class="btn btn-secondary" id="alarmOffBtn" style="width: 100%; padding: 8px; font-size: 13px; color: var(--danger); border-color: rgba(239,68,68,.25); background: rgba(239,68,68,.05);">Tắt còi báo động</button>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+
+</html>

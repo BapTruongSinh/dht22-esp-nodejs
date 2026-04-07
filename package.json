@@ -1,0 +1,16 @@
+{
+  "name": "iot-dht22-motor-server",
+  "version": "1.0.0",
+  "description": "Node.js WebSocket server for DHT22 sensor and motor control via ESP8266/ESP32",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "mock": "node mock-esp.js"
+  },
+  "keywords": ["iot", "esp8266", "dht22", "websocket", "motor"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "ws": "^8.20.0"
+  }
+}
