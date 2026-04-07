@@ -85,11 +85,8 @@ wss.on('connection', (ws, req) => {
     feClients.add(ws);
     console.log(`[FE] Kết nối (${feClients.size} client)`);
 
-    // Gửi toàn bộ trạng thái hiện tại ngay khi FE kết nối
+    // Gửi trạng thái ESP và dữ liệu cảm biến (nếu có) ngay khi FE kết nối
     ws.send(JSON.stringify({ type: 'esp_status',   connected: esp.isConnected() }));
-    ws.send(JSON.stringify({ type: 'mode_state',   mode:  esp.getMode() }));
-    ws.send(JSON.stringify({ type: 'fan_state',    state: esp.getFanState() }));
-    ws.send(JSON.stringify({ type: 'buzzer_state', state: esp.getBuzzerState() }));
     const last = esp.getLastData();
     if (last) ws.send(JSON.stringify({ type: 'sensor_update', ...last }));
 
@@ -100,14 +97,12 @@ wss.on('connection', (ws, req) => {
         // ── Chuyển mode ───────────────────────────────────────────────────────
         if (msg.type === 'mode') {
           esp.setMode(msg.value);
-          broadcast({ type: 'mode_state', mode: msg.value });
+          // ESP sẽ gửi lại status mới, server sẽ tự broadcast sensor_update sau
 
         // ── Điều khiển quạt ───────────────────────────────────────────────────
         } else if (msg.type === 'fan') {
           const ok = esp.setFan(msg.state);
-          if (ok) {
-            broadcast({ type: 'fan_state', state: esp.getFanState() });
-          } else {
+          if (!ok) {
             ws.send(JSON.stringify({ type: 'error', reason: 'AUTO_MODE' }));
           }
 
