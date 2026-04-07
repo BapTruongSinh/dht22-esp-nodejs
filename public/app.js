@@ -144,7 +144,7 @@ alarmOffBtn.addEventListener('click', () => {
 });
 
 
-modeSwitch.addEventListener('change', () => {v
+modeSwitch.addEventListener('change', () => {
   const mode = modeSwitch.checked ? 'AUTO' : 'MANUAL';
   updateModeUI(mode);
   send({ type: 'mode', value: mode });
