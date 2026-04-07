@@ -46,8 +46,13 @@ ws.onmessage = (event) => {
 
     switch (msg.type) {
       case 'sensor_update':
-        updateSensors(msg.temp, msg.humi);
-        pushChartData(msg.temp, msg.humi);
+        if (msg.error) {
+          tempValueEl.textContent = '--';
+          humidityValueEl.textContent = '--';
+        } else {
+          updateSensors(msg.temp, msg.humi);
+          pushChartData(msg.temp, msg.humi);
+        }
         if (msg.app_state !== undefined) document.getElementById('appStateValue').textContent = `Trạng thái: ${msg.app_state}`;
         break;
 
