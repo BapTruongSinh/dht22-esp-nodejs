@@ -4,299 +4,151 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>IoT Dashboard – DHT22</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+  <title>Dashboard VDK</title>
 
-    body {
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      background: #0f172a;
-      color: #e2e8f0;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding: 28px 16px;
-      gap: 20px;
-    }
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
 
-    h1 { font-size: 1.5rem; color: #7dd3fc; letter-spacing: 0.05em; }
-
-    /* ── Status bar ── */
-    #status-bar {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      background: #1e293b;
-      border: 1px solid #334155;
-      border-radius: 12px;
-      padding: 10px 20px;
-      font-size: 0.9rem;
-      flex-wrap: wrap;
-    }
-    .dot {
-      width: 10px; height: 10px;
-      border-radius: 50%;
-      background: #ef4444;
-      transition: background 0.3s;
-      flex-shrink: 0;
-    }
-    .dot.on { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
-
-    /* ── Mode banner ── */
-    #mode-banner {
-      width: 100%;
-      max-width: 740px;
-      background: rgba(30,41,59,0.85);
-      border: 1px solid #334155;
-      border-radius: 16px;
-      padding: 18px 24px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      flex-wrap: wrap;
-      gap: 14px;
-    }
-    #mode-banner h2 {
-      font-size: 0.8rem;
-      color: #94a3b8;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 6px;
-    }
-    #mode-info { display: flex; align-items: center; gap: 12px; }
-
-    /* ── Badge ── */
-    .badge {
-      display: inline-block;
-      padding: 5px 16px;
-      border-radius: 20px;
-      font-size: 0.85rem;
-      font-weight: 600;
-    }
-    .badge-normal      { background: #166534; color: #4ade80; }
-    .badge-warning     { background: #713f12; color: #fbbf24; }
-    .badge-alarm       { background: #7f1d1d; color: #f87171; }
-    .badge-error       { background: #3b0764; color: #e879f9; }
-    .badge-mode-auto   { background: #1e3a5f; color: #7dd3fc; border: 1px solid #3b82f6; }
-    .badge-mode-manual { background: #3b2a1a; color: #fb923c; border: 1px solid #f97316; }
-
-    /* ── Mode buttons ── */
-    .mode-btns { display: flex; gap: 10px; }
-    .btn-mode {
-      padding: 9px 22px;
-      border: 2px solid #334155;
-      border-radius: 10px;
-      font-size: 0.9rem;
-      font-weight: 600;
-      cursor: pointer;
-      background: transparent;
-      color: #94a3b8;
-      transition: all 0.2s ease;
-    }
-    .btn-mode:hover { border-color: #64748b; color: #e2e8f0; }
-    .btn-mode.active[data-mode="AUTO"]   {
-      background: #1e3a5f; color: #7dd3fc;
-      border-color: #3b82f6;
-      box-shadow: 0 0 12px rgba(59,130,246,0.3);
-    }
-    .btn-mode.active[data-mode="MANUAL"] {
-      background: #3b2a1a; color: #fb923c;
-      border-color: #f97316;
-      box-shadow: 0 0 12px rgba(249,115,22,0.3);
-    }
-
-    /* ── Grid cards ── */
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 16px;
-      width: 100%;
-      max-width: 740px;
-    }
-    .card {
-      background: rgba(30,41,59,0.85);
-      border: 1px solid #334155;
-      border-radius: 16px;
-      padding: 24px;
-      text-align: center;
-    }
-    .card-label {
-      font-size: 0.75rem;
-      color: #94a3b8;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 8px;
-    }
-    .card-value {
-      font-size: 2.6rem;
-      font-weight: 700;
-      color: #7dd3fc;
-    }
-    .card-unit { font-size: 1rem; color: #64748b; margin-left: 4px; }
-    .card-state-wrap { margin-top: 6px; }
-
-    /* ── Control card ── */
-    #ctrl-card {
-      width: 100%;
-      max-width: 740px;
-      background: rgba(30,41,59,0.85);
-      border: 1px solid #334155;
-      border-radius: 16px;
-      padding: 24px;
-    }
-    #ctrl-card h2 {
-      font-size: 0.8rem;
-      color: #94a3b8;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 16px;
-    }
-
-    .ctrl-row {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-      flex-wrap: wrap;
-      margin-bottom: 14px;
-    }
-    .ctrl-row:last-child { margin-bottom: 0; }
-    .ctrl-label { font-size: 0.9rem; color: #cbd5e1; min-width: 80px; }
-
-    /* Device state text */
-    #fan-state-text, #buzzer-state-text {
-      font-size: 1.1rem;
-      font-weight: 700;
-      min-width: 42px;
-    }
-    #fan-state-text.on,    #buzzer-state-text.on  { color: #22c55e; }
-    #fan-state-text.off,   #buzzer-state-text.off { color: #ef4444; }
-
-    /* Disabled overlay hint */
-    .auto-lock-hint {
-      font-size: 0.75rem;
-      color: #475569;
-      font-style: italic;
-      display: none;
-    }
-    body.mode-auto .auto-lock-hint { display: inline; }
-
-    /* ── Buttons ── */
-    .btn {
-      padding: 10px 26px;
-      border: none;
-      border-radius: 10px;
-      font-size: 0.9rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }
-    .btn:hover:not(:disabled) { transform: translateY(-2px); }
-    .btn:disabled {
-      opacity: 0.3;
-      cursor: not-allowed;
-      transform: none !important;
-      filter: grayscale(0.5);
-    }
-    .btn-on     { background: #16a34a; color: #fff; }
-    .btn-on:hover:not(:disabled)  { background: #15803d; }
-    .btn-off    { background: #dc2626; color: #fff; }
-    .btn-off:hover:not(:disabled) { background: #b91c1c; }
-    .btn-buzzer { background: linear-gradient(135deg, #7c3aed, #db2777); color: #fff; }
-    .btn-buzzer:hover:not(:disabled) { box-shadow: 0 6px 20px rgba(167,139,250,0.4); }
-
-    /* ── Log box ── */
-    #log-box {
-      width: 100%;
-      max-width: 740px;
-      background: #0f172a;
-      border: 1px solid #1e3a5f;
-      border-radius: 12px;
-      padding: 12px;
-      height: 160px;
-      overflow-y: auto;
-      font-family: 'Consolas', monospace;
-      font-size: 0.78rem;
-      color: #94a3b8;
-    }
-    #log-box p { padding: 2px 0; border-bottom: 1px solid #1e293b; }
-    #log-box p:last-child { border-bottom: none; }
-    .log-info { color: #7dd3fc; }
-    .log-warn { color: #fbbf24; }
-    .log-ok   { color: #4ade80; }
-    .log-err  { color: #f87171; }
-  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 
 <body>
-
-  <h1>🌡️ IoT Dashboard – DHT22</h1>
-
-  <!-- Trạng thái kết nối -->
-  <div id="status-bar">
-    <div class="dot" id="ws-dot"></div>
-    <span id="ws-status">Đang kết nối WebSocket...</span>
-    &nbsp;|&nbsp;
-    <div class="dot" id="esp-dot"></div>
-    <span id="esp-status">ESP chưa kết nối</span>
-  </div>
-
-  <!-- Mode banner -->
-  <div id="mode-banner">
-    <div>
-      <h2>Chế độ điều khiển</h2>
-      <div id="mode-info">
-        <span id="mode-badge" class="badge badge-mode-auto">🤖 AUTO</span>
-        <span class="auto-lock-hint">Nút điều khiển bị khoá khi đang AUTO</span>
+  <main class="content">
+    <header class="topbar" style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+      <div>
+        <h1 class="topbar-title">Dashboard</h1>
+        <p class="topbar-subtitle">Giám sát nhiệt độ, độ ẩm không khí và điều khiển quạt, còi</p>
       </div>
-    </div>
-    <div class="mode-btns">
-      <button class="btn-mode active" id="btn-mode-auto"   data-mode="AUTO"   onclick="setMode('AUTO')">🤖 AUTO</button>
-      <button class="btn-mode"        id="btn-mode-manual" data-mode="MANUAL" onclick="setMode('MANUAL')">🕹️ MANUAL</button>
-    </div>
-  </div>
-
-  <!-- Dữ liệu cảm biến -->
-  <div class="grid">
-    <div class="card">
-      <div class="card-label">Nhiệt độ</div>
-      <div class="card-value" id="temp-val">--<span class="card-unit">°C</span></div>
-    </div>
-    <div class="card">
-      <div class="card-label">Độ ẩm</div>
-      <div class="card-value" id="humi-val">--<span class="card-unit">%</span></div>
-    </div>
-    <div class="card">
-      <div class="card-label">Trạng thái</div>
-      <div class="card-state-wrap">
-        <div id="app-state-badge" class="badge badge-normal">NORMAL</div>
+      <div>
+        <span id="wsStatusBadge" style="padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: bold; background: #f1f5f9; color: #64748b; white-space: nowrap;">
+          <i class="fa-solid fa-spinner fa-spin"></i> Đang kết nối...
+        </span>
       </div>
-    </div>
-  </div>
+    </header>
 
-  <!-- Điều khiển -->
-  <div id="ctrl-card">
-    <h2>Điều khiển thiết bị</h2>
+    <section class="page">
+      <section class="sensor-grid">
+        <article class="sensor-card temp">
+          <div class="sensor-top">
+            <div>
+              <div class="sensor-label">Nhiệt độ</div>
+              <div class="sensor-value" id="tempValue">-- °C</div>
+              <div class="sensor-subtext">Giá trị nhiệt độ hiện tại.</div>
+            </div>
+            <div class="sensor-badge temp"><i class="fa-solid fa-temperature-half"></i></div>
+          </div>
+        </article>
 
-    <!-- Quạt -->
-    <div class="ctrl-row">
-      <span class="ctrl-label">🌀 Quạt</span>
-      <span id="fan-state-text" class="off">OFF</span>
-      <button class="btn btn-on"  id="btn-fan-on"  onclick="setFan('ON')" >Bật</button>
-      <button class="btn btn-off" id="btn-fan-off" onclick="setFan('OFF')">Tắt</button>
-    </div>
+        <article class="sensor-card humidity">
+          <div class="sensor-top">
+            <div>
+              <div class="sensor-label">Độ ẩm không khí</div>
+              <div class="sensor-value" id="humidityValue">-- %</div>
+              <div class="sensor-subtext">Giá trị độ ẩm không khí hiện tại.</div>
+            </div>
+            <div class="sensor-badge humidity"><i class="fa-solid fa-droplet"></i></div>
+          </div>
+        </article>
 
-    <!-- Còi -->
-    <div class="ctrl-row">
-      <span class="ctrl-label">🔔 Còi</span>
-      <span id="buzzer-state-text" class="off">OFF</span>
-      <button class="btn btn-buzzer" id="btn-buzzer-off" onclick="buzzerOff()">Tắt còi</button>
-    </div>
-  </div>
+        <article class="sensor-card status">
+          <div class="sensor-top">
+            <div>
+              <div class="sensor-label">Trạng thái ESP</div>
+              <div class="sensor-value" id="espStatusValue" style="font-size: 28px;">Đang tải...</div>
+              <div class="sensor-subtext" id="appStateValue">Trạng thái: chờ kết nối</div>
+            </div>
+            <div class="sensor-badge status"><i class="fa-solid fa-microchip"></i></div>
+          </div>
+        </article>
+      </section>
 
-  <!-- Log -->
-  <div id="log-box"></div>
+      <section class="bottom-row">
+        <div class="charts-inline">
+          <article class="chart-card">
+            <div class="card-head">
+              <div>
+                <h3 class="card-title">Biểu đồ nhiệt độ</h3>
+              </div>
+            </div>
+            <div class="chart-shell">
+              <canvas id="tempChart"></canvas>
+            </div>
+          </article>
+
+          <article class="chart-card">
+            <div class="card-head">
+              <div>
+                <h3 class="card-title">Biểu đồ độ ẩm không khí</h3>
+              </div>
+            </div>
+            <div class="chart-shell">
+              <canvas id="humidityChart"></canvas>
+            </div>
+          </article>
+        </div>
+
+        <article class="device-card device-card-compact">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title">Điều khiển thiết bị</h3>
+              <p class="card-subtitle">Quạt và còi cảnh báo</p>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span id="modeLabel" style="font-size: 13px; font-weight: 800; color: #2563eb;">AUTO</span>
+              <label class="switch">
+                <input type="checkbox" id="modeSwitch" />
+                <span></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="device-list compact">
+            <div class="device-item">
+              <div class="device-top">
+                <div class="device-left">
+                  <div class="device-icon"><i class="fa-solid fa-fan"></i></div>
+                  <div>
+                    <div class="device-name">Quạt thông gió</div>
+                    <div class="device-desc">Điều khiển quạt làm mát.</div>
+                  </div>
+                </div>
+                <span class="status-badge on" id="fanBadge">On</span>
+              </div>
+              <div class="device-bottom">
+                <div class="device-power">Thiết bị quạt</div>
+                <label class="switch">
+                  <input type="checkbox" id="fanSwitch"/>
+                  <span></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="device-item">
+              <div class="device-top" style="margin-bottom: 8px;">
+                <div class="device-left">
+                  <div class="device-icon" style="background:rgba(239,68,68,.10); color:var(--danger);"><i
+                      class="fa-solid fa-bullhorn"></i></div>
+                  <div>
+                    <div class="device-name">Còi cảnh báo</div>
+                    <div class="device-desc">Chỉ hỗ trợ tắt còi thủ công.</div>
+                  </div>
+                </div>
+                <span class="status-badge off" id="alarmBadge">Off</span>
+              </div>
+              <div class="device-bottom" style="margin-top: 2px;">
+                <button class="btn btn-secondary" id="alarmOffBtn" style="width: 100%; padding: 8px; font-size: 13px; color: var(--danger); border-color: rgba(239,68,68,.25); background: rgba(239,68,68,.05);">Tắt còi báo động</button>
+              </div>
+            </div>
+          </div>
+        </article>
+      </section>
+    </section>
+  </main>
 
   <script src="app.js"></script>
 </body>
+
 </html>

@@ -84,7 +84,7 @@ body {
 
 .sensor-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 18px;
     margin-bottom: 18px;
 }
@@ -120,6 +120,10 @@ body {
     background: radial-gradient(circle, rgba(37, 99, 235, .14), transparent 62%);
 }
 
+.sensor-card.status::after {
+    background: radial-gradient(circle, rgba(16, 185, 129, .14), transparent 62%);
+}
+
 .sensor-top {
     display: flex;
     justify-content: space-between;
@@ -143,7 +147,7 @@ body {
 }
 
 .sensor-subtext {
-    font-size: 14px;
+    font-size: 15px;
     color: var(--muted);
     font-weight: 400;
     line-height: 1.5;
@@ -168,6 +172,11 @@ body {
 .sensor-badge.humidity {
     background: var(--primary-soft);
     color: var(--primary);
+}
+
+.sensor-badge.status {
+    background: rgba(16, 185, 129, 0.12);
+    color: #10b981;
 }
 
 .bottom-row {
@@ -364,6 +373,16 @@ body {
     transform: translateX(28px);
 }
 
+.switch input:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
+
+.switch input:disabled+span {
+    background: #f1f5f9;
+    box-shadow: 0 4px 8px rgba(15, 23, 42, .05);
+}
+
 .device-actions {
     margin-top: 14px;
     display: grid;
@@ -381,8 +400,14 @@ body {
     transition: .2s ease;
 }
 
-.btn:hover {
+.btn:hover:not(:disabled) {
     transform: translateY(-1px);
+}
+
+.btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    box-shadow: none;
 }
 
 .btn-primary {
@@ -396,6 +421,10 @@ body {
     color: #334155;
     border: 1px solid var(--border);
     box-shadow: var(--shadow-soft);
+}
+
+.hidden {
+    display: none !important;
 }
 
 @media (max-width: 1180px) {
@@ -443,6 +472,6 @@ body {
     }
 
     .sensor-value {
-        font-size: 36px;
+        font-size: 28px;
     }
 }

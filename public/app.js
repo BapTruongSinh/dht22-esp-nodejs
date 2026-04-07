@@ -1,207 +1,270 @@
-// public/app.js – WebSocket client cho Dashboard
-// Kết nối: ws://<host>/fe
-//
-// Nhận từ server:
-//   { type: "sensor_update", temp, humi, fan, buzzer, mode, alarm, error, app_state, timestamp }
-//   { type: "fan_state",    state: "ON"|"OFF" }
-//   { type: "buzzer_state", state: "ON"|"OFF" }
-//   { type: "mode_state",   mode:  "AUTO"|"MANUAL" }
-//   { type: "event",        event: "ALARM"|"NORMAL"|... }
-//   { type: "esp_status",   connected: bool }
-//   { type: "error",        reason: "AUTO_MODE" }
-//
-// Gửi lên server:
-//   { type: "fan",       state: "ON"|"OFF" }
-//   { type: "buzzer_off" }
-//   { type: "mode",      value: "AUTO"|"MANUAL" }
-
 const WS_URL = `ws://${location.host}/fe`;
+const MAX_POINTS = 20;
 
-let ws = null;
-let reconnectTimer = null;
-let currentMode = 'AUTO';   // theo dõi mode hiện tại
+let currentAlarmState = false;
+const ws = new WebSocket(WS_URL);
 
-// ── DOM ──────────────────────────────────────────────────────────────────────
-const $ = id => document.getElementById(id);
-
-const wsDot        = $('ws-dot');
-const wsStatus     = $('ws-status');
-const espDot       = $('esp-dot');
-const espStatus    = $('esp-status');
-const tempVal      = $('temp-val');
-const humiVal      = $('humi-val');
-const appStateBadge= $('app-state-badge');
-const fanText      = $('fan-state-text');
-const buzzerText   = $('buzzer-state-text');
-const modeBadge    = $('mode-badge');
-const logBox       = $('log-box');
-
-const btnFanOn     = $('btn-fan-on');
-const btnFanOff    = $('btn-fan-off');
-const btnBuzzerOff = $('btn-buzzer-off');
-const btnModeAuto  = $('btn-mode-auto');
-const btnModeManual= $('btn-mode-manual');
-
-// ── Log ──────────────────────────────────────────────────────────────────────
-function log(msg, type = 'info') {
-  const p = document.createElement('p');
-  p.className = `log-${type}`;
-  p.textContent = `[${new Date().toLocaleTimeString('vi-VN')}] ${msg}`;
-  logBox.prepend(p);
-  if (logBox.children.length > 60) logBox.removeChild(logBox.lastChild);
-}
-
-// ── UI Updates ───────────────────────────────────────────────────────────────
-const STATE_CLASS = {
-  NORMAL:      'badge-normal',
-  WARNING:     'badge-warning',
-  ALARM:       'badge-alarm',
-  ERROR_STATE: 'badge-error',
-  ERROR:       'badge-error',
-};
-
-function updateSensor(data) {
-  tempVal.innerHTML = `${parseFloat(data.temp).toFixed(1)}<span class="card-unit">°C</span>`;
-  humiVal.innerHTML = `${parseFloat(data.humi).toFixed(1)}<span class="card-unit">%</span>`;
-
-  const state = data.app_state || 'NORMAL';
-  appStateBadge.textContent = state;
-  appStateBadge.className   = `badge ${STATE_CLASS[state] || 'badge-normal'}`;
-}
-
-function updateFan(state) {
-  const isOn = (state == 1 || state === 'ON' || state === 'on');
-  fanText.textContent = isOn ? 'ON' : 'OFF';
-  fanText.className   = isOn ? 'on' : 'off';
-}
-
-function updateBuzzer(state) {
-  const isOn = (state === 'on' || state === 'ON' || state == 1);
-  buzzerText.textContent = isOn ? 'ON' : 'OFF';
-  buzzerText.className   = isOn ? 'on' : 'off';
-}
-
-function updateESP(connected) {
-  espDot.className      = connected ? 'dot on' : 'dot';
-  espStatus.textContent = connected ? 'ESP đã kết nối' : 'ESP chưa kết nối';
-  if (!connected) {
-    appStateBadge.textContent = "OFFLINE";
-    appStateBadge.className   = "badge badge-error";
-  }
-}
-
-function updateMode(mode) {
-  currentMode = mode;
-  const isAuto = mode === 'AUTO';
-
-  // Cập nhật badge
-  modeBadge.textContent = isAuto ? '🤖 AUTO' : '🕹️ MANUAL';
-  modeBadge.className   = isAuto ? 'badge badge-mode-auto' : 'badge badge-mode-manual';
-
-  // Disable nút điều khiển khi đang AUTO
-  btnFanOn.disabled     = isAuto;
-  btnFanOff.disabled    = isAuto;
-  btnBuzzerOff.disabled = isAuto;
-
-  // Highlight nút mode đang active
-  btnModeAuto.classList.toggle('active', isAuto);
-  btnModeManual.classList.toggle('active', !isAuto);
-
-  log(`🔄 Chế độ: ${mode}`, 'info');
-}
-
-// ── WebSocket ────────────────────────────────────────────────────────────────
-function connect() {
-  clearTimeout(reconnectTimer);
-  ws = new WebSocket(WS_URL);
-
-  ws.onopen = () => {
-    wsDot.className      = 'dot on';
-    wsStatus.textContent = 'Đã kết nối server';
-    log('✅ Kết nối server thành công', 'ok');
-  };
-
-  ws.onclose = () => {
-    wsDot.className      = 'dot';
-    wsStatus.textContent = 'Mất kết nối, thử lại sau 5s...';
-    log('❌ Mất kết nối server', 'warn');
-    reconnectTimer = setTimeout(connect, 5000);
-  };
-
-  ws.onerror = () => log('⚠️ Lỗi WebSocket', 'warn');
-
-  ws.onmessage = ({ data }) => {
-    try {
-      const msg = JSON.parse(data);
-      switch (msg.type) {
-
-        case 'sensor_update':
-          updateSensor(msg);
-          if (msg.mode)   updateMode(msg.mode);
-          if (msg.fan !== undefined) updateFan(msg.fan);
-          if (msg.buzzer_state !== undefined) updateBuzzer(msg.buzzer_state);
-          log(`🌡 ${parseFloat(msg.temp).toFixed(1)}°C | 💧 ${parseFloat(msg.humi).toFixed(1)}% | Quạt: ${msg.fan == 1 ? 'ON' : 'OFF'} | Còi: ${msg.buzzer_state === 'on' ? 'ON' : 'OFF'} | ${msg.app_state}`, 'info');
-          break;
-
-        case 'event':
-          log(`📣 Sự kiện: ${msg.event}`, msg.event === 'ALARM' ? 'err' : 'warn');
-          break;
-
-        case 'esp_status':
-          updateESP(msg.connected);
-          log(`ESP ${msg.connected ? '🟢 kết nối' : '🔴 ngắt kết nối'}`, msg.connected ? 'ok' : 'warn');
-          break;
-
-        case 'offline':
-          log(`[OFFLINE] ${msg.message}`, 'error');
-          updateESP(false);
-          break;
-
-        case 'error':
-          if (msg.reason === 'AUTO_MODE')
-            log('⚠️ Không thể điều khiển khi đang ở chế độ AUTO!', 'warn');
-          break;
-
-        default:
-          log(`[?] Nhận: ${data}`, 'warn');
-      }
-    } catch {
-      log('Parse lỗi: ' + data, 'warn');
-    }
-  };
-}
-
-// ── Gửi lệnh ─────────────────────────────────────────────────────────────────
-function send(payload) {
-  if (ws && ws.readyState === WebSocket.OPEN) {
+const send = (payload) => {
+  if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(payload));
   } else {
-    log('⚠️ Chưa kết nối server!', 'warn');
+    console.log('Chưa kết nối server, không gửi được lệnh!');
   }
 }
 
-function setFan(state) {
-  if (currentMode === 'AUTO') {
-    log('⛔ Không thể điều khiển quạt ở chế độ AUTO', 'warn');
-    return;
+const updateWSStatus = (connected) => {
+  const badge = document.getElementById('wsStatusBadge');
+  if (!badge) return;
+  if (connected) {
+    badge.innerHTML = 'Đã kết nối Server';
+    badge.style.background = 'white';
+    badge.style.color = 'green';
+  } else {
+    badge.innerHTML = 'Mất kết nối Server';
+    badge.style.background = 'white';
+    badge.style.color = 'red';
   }
+}
+
+ws.onopen = () => {
+  updateWSStatus(true);
+  modeSwitch.disabled = false;
+  fanSwitch.disabled = modeSwitch.checked;
+  alarmOffBtn.disabled = modeSwitch.checked;
+};
+
+ws.onclose = () => {
+  updateWSStatus(false);
+  modeSwitch.disabled = true;
+  fanSwitch.disabled = true;
+  alarmOffBtn.disabled = true;
+};
+
+ws.onmessage = (event) => {
+  try {
+    const msg = JSON.parse(event.data);
+
+    console.log('msg:', msg);
+
+    switch (msg.type) {
+      case 'sensor_update':
+        console.log('sensor_update:', msg);
+        if (msg.app_state == "ERROR") {
+          tempValueEl.textContent = '--';
+          humidityValueEl.textContent = '--';
+        } else {
+          updateSensors(msg.temp, msg.humi);
+          pushChartData(msg.temp, msg.humi);
+        }
+        if (msg.app_state) document.getElementById('appStateValue').textContent = `Trạng thái: ${msg.app_state}`;
+        break;
+
+      case 'fan_state':
+        fanSwitch.checked = msg.state === 'ON';
+        updateDevices();
+        break;
+
+      case 'mode_state':
+        updateModeUI(msg.mode);
+        break;
+
+      case 'buzzer_state':
+        currentAlarmState = msg.state === 'ON';
+        updateDevices();
+        break;
+
+      case 'esp_status': {
+        const espStatusValue = document.getElementById('espStatusValue');
+        const appStateValue = document.getElementById('appStateValue');
+
+        espStatusValue.textContent = msg.connected ? 'Online' : 'Offline';
+        espStatusValue.style.color = msg.connected ? 'green' : 'red';
+
+        if (!msg.connected) {
+          appStateValue.textContent = 'Trạng thái: ngắt kết nối';
+        }
+
+        break;
+      }
+
+      default:
+        console.log(`Lệnh không xác định: ${msg.type}`);
+        break;
+    }
+  } catch (e) {
+    console.log('Lỗi:', e.message);
+  }
+};
+
+// UI, Chart.js, điều khiển thiết bị
+const tempValueEl = document.getElementById('tempValue');
+const humidityValueEl = document.getElementById('humidityValue');
+const fanSwitch = document.getElementById('fanSwitch');
+const alarmOffBtn = document.getElementById('alarmOffBtn');
+const modeSwitch = document.getElementById('modeSwitch');
+const modeLabel = document.getElementById('modeLabel');
+
+const updateModeUI = (mode) => {
+  const isAuto = mode === 'AUTO';
+  modeSwitch.checked = isAuto;
+  modeLabel.textContent = mode;
+  modeLabel.style.color = isAuto ? 'blue' : 'orange';
+
+  fanSwitch.disabled = isAuto;
+  alarmOffBtn.disabled = isAuto;
+}
+
+const updateSensors = (temp, humidity) => {
+  tempValueEl.textContent = parseFloat(temp).toFixed(1) + '°C';
+  humidityValueEl.textContent = Math.round(humidity) + '%';
+}
+
+const updateBadge = (badgeId, isOn) => {
+  const badge = document.getElementById(badgeId);
+  badge.textContent = isOn ? 'On' : 'Off';
+  badge.className = 'status-badge ' + (isOn ? 'on' : 'off');
+}
+
+const updateDevices = () => {
+  updateBadge('fanBadge', fanSwitch.checked);
+  updateBadge('alarmBadge', currentAlarmState);
+}
+
+// Điều khiển thiết bị
+fanSwitch.addEventListener('change', () => {
+  if (fanSwitch.disabled) return;
+  const state = fanSwitch.checked ? 'ON' : 'OFF';
   send({ type: 'fan', state });
-  log(`📤 Gửi: Quạt ${state}`, 'info');
-}
+  updateDevices();
+});
 
-function buzzerOff() {
-  if (currentMode === 'AUTO') {
-    log('⛔ Không thể tắt còi ở chế độ AUTO', 'warn');
-    return;
-  }
+alarmOffBtn.addEventListener('click', () => {
+  if (alarmOffBtn.disabled) return;
   send({ type: 'buzzer_off' });
-  log('📤 Gửi: Tắt còi', 'info');
-}
+});
 
-function setMode(mode) {
+
+modeSwitch.addEventListener('change', () => {v
+  const mode = modeSwitch.checked ? 'AUTO' : 'MANUAL';
+  updateModeUI(mode);
   send({ type: 'mode', value: mode });
-  log(`📤 Gửi: Chuyển chế độ ${mode}`, 'info');
+});
+
+const tempCtx = document.getElementById('tempChart').getContext('2d');
+const humidityCtx = document.getElementById('humidityChart').getContext('2d');
+
+const tempGradient = tempCtx.createLinearGradient(0, 0, 0, 210);
+tempGradient.addColorStop(0, 'rgba(245, 158, 11, 0.22)');
+tempGradient.addColorStop(1, 'rgba(245, 158, 11, 0)');
+
+const humidityGradient = humidityCtx.createLinearGradient(0, 0, 0, 210);
+humidityGradient.addColorStop(0, 'rgba(37, 99, 235, 0.18)');
+humidityGradient.addColorStop(1, 'rgba(37, 99, 235, 0)');
+
+const commonOptions = {
+  responsive: true,
+  maintainAspectRatio: false,
+  interaction: { mode: 'index', intersect: false },
+  plugins: {
+    legend: { display: false },
+    tooltip: {
+      backgroundColor: 'rgba(15, 23, 42, 0.95)',
+      titleColor: '#ffffff',
+      bodyColor: '#e2e8f0',
+      borderColor: 'rgba(148, 163, 184, 0.25)',
+      borderWidth: 1,
+      padding: 12,
+      displayColors: false
+    }
+  },
+  scales: {
+    x: {
+      grid: { color: 'rgba(226, 232, 240, 0.6)', drawBorder: false },
+      ticks: { color: '#94a3b8', font: { family: 'Roboto', size: 12 } },
+      border: { display: false }
+    },
+    y: {
+      grid: { color: 'rgba(226, 232, 240, 0.8)', drawBorder: false },
+      ticks: { color: '#94a3b8', font: { family: 'Roboto', size: 12 } },
+      border: { display: false }
+    }
+  }
+};
+
+const tempChart = new Chart(tempCtx, {
+  type: 'line',
+  data: {
+    labels: ['0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'],
+    datasets: [{
+      label: 'Nhiệt độ',
+      data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      borderColor: '#f59e0b',
+      backgroundColor: tempGradient,
+      fill: true,
+      tension: 0.38,
+      borderWidth: 3,
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      pointBackgroundColor: '#f59e0b',
+      pointBorderColor: '#ffffff',
+      pointBorderWidth: 2
+    }]
+  },
+  options: {
+    ...commonOptions,
+    scales: {
+      ...commonOptions.scales,
+      y: { ...commonOptions.scales.y, min: 0, max: 50, ticks: { ...commonOptions.scales.y.ticks, stepSize: 10 } }
+    }
+  }
+});
+
+const humidityChart = new Chart(humidityCtx, {
+  type: 'line',
+  data: {
+    labels: ['0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0', '0'],
+    datasets: [{
+      label: 'Độ ẩm không khí',
+      data: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+      borderColor: '#2563eb',
+      backgroundColor: humidityGradient,
+      fill: true,
+      tension: 0.38,
+      borderWidth: 3,
+      pointRadius: 0,
+      pointHoverRadius: 4,
+      pointBackgroundColor: '#2563eb',
+      pointBorderColor: '#ffffff',
+      pointBorderWidth: 2
+    }]
+  },
+  options: {
+    ...commonOptions,
+    scales: {
+      ...commonOptions.scales,
+      y: { ...commonOptions.scales.y, min: 0, max: 100, ticks: { ...commonOptions.scales.y.ticks, stepSize: 20 } }
+    }
+  }
+});
+
+const pushChartData = (temp, humidity) => {
+  const now = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  if (tempChart.data.labels.length >= MAX_POINTS) {
+    tempChart.data.labels.shift();
+    tempChart.data.datasets[0].data.shift();
+    humidityChart.data.labels.shift();
+    humidityChart.data.datasets[0].data.shift();
+  }
+
+  tempChart.data.labels.push(now);
+  tempChart.data.datasets[0].data.push(parseFloat(temp));
+  tempChart.update('none');
+
+  humidityChart.data.labels.push(now);
+  humidityChart.data.datasets[0].data.push(parseFloat(humidity));
+  humidityChart.update('none');
 }
 
-// ── Khởi động ────────────────────────────────────────────────────────────────
-connect();
+updateDevices();
+updateModeUI('AUTO');
