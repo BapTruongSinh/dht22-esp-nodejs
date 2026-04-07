@@ -139,7 +139,6 @@ setInterval(() => {
 
 function markESPDisconnected(reason) {
   if (!esp.isConnected()) return;
-  console.warn(`[ESP] Mất kết nối logic: ${reason}`);
   esp.unregisterESP();
   broadcast({ type: 'esp_status', connected: false });
 }
