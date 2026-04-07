@@ -64,12 +64,12 @@ function handleESPMessage(raw) {
       return { type: 'event', event: msg.data.event };
     }
 
-    // Realtime data: { temp, humi, fan, buzzer, mode, alarm, error, app_state, system_state }
+    // Realtime data: { temp, humi, fan, buzzer_state, mode, app_state, system_state }
     if (typeof msg.temp === 'number' && typeof msg.humi === 'number') {
       // Đồng bộ trạng thái từ ESP về server
       currentMode  = msg.mode   || 'AUTO';
       fanState     = toBool(msg.fan) ? 'ON' : 'OFF';
-      buzzerState  = toBool(msg.buzzer) ? 'ON' : 'OFF';
+      buzzerState  = toBool(msg.buzzer_state) ? 'ON' : 'OFF';
 
       lastData = {
         ...msg,
