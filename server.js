@@ -37,13 +37,6 @@ function broadcast(payload) {
     if (ws.readyState === 1) ws.send(msg);
 }
 
-function markESPDisconnected(reason) {
-  if (!esp.isConnected()) return;
-  console.warn(`[ESP] Mất kết nối logic: ${reason}`);
-  esp.unregisterESP();
-  broadcast({ type: 'esp_status', connected: false });
-}
-
 wss.on('connection', (ws, req) => {
   const url = req.url;
 
@@ -144,6 +137,12 @@ setInterval(() => {
   }
 }, ESP_WATCHDOG_INTERVAL_MS);
 
+function markESPDisconnected(reason) {
+  if (!esp.isConnected()) return;
+  console.warn(`[ESP] Mất kết nối logic: ${reason}`);
+  esp.unregisterESP();
+  broadcast({ type: 'esp_status', connected: false });
+}
 //Khởi động
 httpServer.listen(PORT, () => {
   console.log(`Server: http://localhost:${PORT}`);
