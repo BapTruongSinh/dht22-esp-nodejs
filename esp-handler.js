@@ -75,8 +75,6 @@ function handleESPMessage(raw) {
       return { type: 'sensor', data: lastData };
     }
 
-    // Heartbeat ping
-    if (msg.topic === 'ping') return null;
 
     console.warn('[ESP] Tin nhắn không xác định:', raw);
     return null;
