@@ -1,175 +1,140 @@
 <!DOCTYPE html>
 <html lang="vi">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>IoT Dashboard - DHT22 & Motor Control</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+  <title>Dashboard VDK</title>
 
-    body {
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      background: #0f172a;
-      color: #e2e8f0;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 24px;
-      gap: 20px;
-    }
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
 
-    h1 { font-size: 1.5rem; color: #7dd3fc; letter-spacing: 0.05em; }
-
-    /* ── Status Bar ── */
-    #status-bar {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      background: #1e293b;
-      border: 1px solid #334155;
-      border-radius: 12px;
-      padding: 10px 20px;
-      font-size: 0.9rem;
-    }
-
-    .dot {
-      width: 10px; height: 10px;
-      border-radius: 50%;
-      background: #ef4444;
-      transition: background 0.3s;
-    }
-    .dot.connected { background: #22c55e; box-shadow: 0 0 8px #22c55e; }
-
-    /* ── Cards ── */
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 16px;
-      width: 100%;
-      max-width: 720px;
-    }
-
-    .card {
-      background: rgba(30, 41, 59, 0.8);
-      border: 1px solid #334155;
-      border-radius: 16px;
-      padding: 24px;
-      text-align: center;
-      backdrop-filter: blur(8px);
-    }
-
-    .card-label {
-      font-size: 0.8rem;
-      color: #94a3b8;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 8px;
-    }
-
-    .card-value {
-      font-size: 2.4rem;
-      font-weight: 700;
-      color: #7dd3fc;
-    }
-
-    .card-unit {
-      font-size: 1rem;
-      color: #64748b;
-      margin-left: 4px;
-    }
-
-    /* ── Motor Control ── */
-    #motor-card { max-width: 720px; width: 100%; }
-
-    .motor-state {
-      font-size: 1.4rem;
-      font-weight: 700;
-      margin-bottom: 16px;
-    }
-    .motor-state.on  { color: #22c55e; }
-    .motor-state.off { color: #ef4444; }
-
-    .btn {
-      display: inline-block;
-      padding: 12px 36px;
-      border: none;
-      border-radius: 10px;
-      font-size: 1rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      margin: 6px;
-    }
-    .btn-toggle {
-      background: linear-gradient(135deg, #3b82f6, #7c3aed);
-      color: #fff;
-    }
-    .btn-toggle:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(99,102,241,0.4); }
-    .btn-on  { background: #16a34a; color: #fff; }
-    .btn-off { background: #dc2626; color: #fff; }
-    .btn-on:hover  { background: #15803d; }
-    .btn-off:hover { background: #b91c1c; }
-
-    /* ── Log ── */
-    #log-box {
-      width: 100%;
-      max-width: 720px;
-      background: #0f172a;
-      border: 1px solid #1e3a5f;
-      border-radius: 12px;
-      padding: 12px;
-      height: 160px;
-      overflow-y: auto;
-      font-family: 'Cascadia Code', 'Consolas', monospace;
-      font-size: 0.78rem;
-      color: #94a3b8;
-    }
-
-    #log-box p { padding: 2px 0; border-bottom: 1px solid #1e293b; }
-    #log-box p:last-child { border-bottom: none; }
-    .log-info  { color: #7dd3fc; }
-    .log-warn  { color: #fbbf24; }
-    .log-ok    { color: #4ade80; }
-  </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
+
 <body>
-  <h1>IoT Dashboard - DHT22 & Motor Control</h1>
+  <main class="content">
+    <header class="topbar">
+      <div>
+        <h1 class="topbar-title">Dashboard</h1>
+        <p class="topbar-subtitle">Giám sát nhiệt độ, độ ẩm không khí và điều khiển quạt, còi</p>
+      </div>
+    </header>
 
-  <!-- Trang thai ket noi -->
-  <div id="status-bar">
-    <div class="dot" id="ws-dot"></div>
-    <span id="ws-status">Dang ket noi WebSocket...</span>
-    &nbsp;|&nbsp;
-    <div class="dot" id="esp-dot"></div>
-    <span id="esp-status">ESP chua ket noi</span>
-  </div>
+    <section class="page">
+      <section class="sensor-grid">
+        <article class="sensor-card temp">
+          <div class="sensor-top">
+            <div>
+              <div class="sensor-label">Nhiệt độ</div>
+              <div class="sensor-value" id="tempValue">28.4°C</div>
+              <div class="sensor-subtext">Giá trị nhiệt độ hiện tại.</div>
+            </div>
+            <div class="sensor-badge temp">🌡</div>
+          </div>
+        </article>
 
-  <!-- Du lieu cam bien -->
-  <div class="grid">
-    <div class="card">
-      <div class="card-label">Nhiet do</div>
-      <div class="card-value" id="temp-val">--<span class="card-unit">C</span></div>
-    </div>
-    <div class="card">
-      <div class="card-label">Do am</div>
-      <div class="card-value" id="humid-val">--<span class="card-unit">%</span></div>
-    </div>
-  </div>
+        <article class="sensor-card humidity">
+          <div class="sensor-top">
+            <div>
+              <div class="sensor-label">Độ ẩm không khí</div>
+              <div class="sensor-value" id="humidityValue">61%</div>
+              <div class="sensor-subtext">Giá trị độ ẩm không khí hiện tại.</div>
+            </div>
+            <div class="sensor-badge humidity"><i class="fa-solid fa-droplet"></i></div>
+          </div>
+        </article>
+      </section>
 
-  <!-- Dieu khien dong co -->
-  <div class="card" id="motor-card">
-    <div class="card-label">Trang thai Dong co</div>
-    <div class="motor-state off" id="motor-state-text">OFF</div>
-    <button class="btn btn-toggle" id="btn-toggle" onclick="toggleMotor()">Toggle</button>
-    <button class="btn btn-on"     id="btn-on"     onclick="setMotor('ON')">Bat</button>
-    <button class="btn btn-off"    id="btn-off"    onclick="setMotor('OFF')">Tat</button>
-  </div>
+      <section class="bottom-row">
+        <div class="charts-inline">
+          <article class="chart-card">
+            <div class="card-head">
+              <div>
+                <h3 class="card-title">Biểu đồ nhiệt độ</h3>
+              </div>
+            </div>
+            <div class="chart-shell">
+              <canvas id="tempChart"></canvas>
+            </div>
+          </article>
 
-  <!-- Log -->
-  <div id="log-box"></div>
+          <article class="chart-card">
+            <div class="card-head">
+              <div>
+                <h3 class="card-title">Biểu đồ độ ẩm không khí</h3>
+              </div>
+            </div>
+            <div class="chart-shell">
+              <canvas id="humidityChart"></canvas>
+            </div>
+          </article>
+        </div>
+
+        <article class="device-card device-card-compact">
+          <div class="card-head">
+            <div>
+              <h3 class="card-title">Điều khiển thiết bị</h3>
+              <p class="card-subtitle">Quạt và còi cảnh báo</p>
+            </div>
+          </div>
+
+          <div class="device-list compact">
+            <div class="device-item">
+              <div class="device-top">
+                <div class="device-left">
+                  <div class="device-icon"><i class="fa-solid fa-fan"></i></div>
+                  <div>
+                    <div class="device-name">Quạt thông gió</div>
+                    <div class="device-desc">Điều khiển quạt làm mát.</div>
+                  </div>
+                </div>
+                <span class="status-badge on" id="fanBadge">On</span>
+              </div>
+              <div class="device-bottom">
+                <div class="device-power">Thiết bị quạt</div>
+                <label class="switch">
+                  <input type="checkbox" id="fanSwitch" checked />
+                  <span></span>
+                </label>
+              </div>
+            </div>
+
+            <div class="device-item">
+              <div class="device-top">
+                <div class="device-left">
+                  <div class="device-icon" style="background:rgba(239,68,68,.10); color:var(--danger);"><i
+                      class="fa-solid fa-bullhorn"></i></div>
+                  <div>
+                    <div class="device-name">Còi cảnh báo</div>
+                    <div class="device-desc">Điều khiển còi cảnh báo.</div>
+                  </div>
+                </div>
+                <span class="status-badge off" id="alarmBadge">Off</span>
+              </div>
+              <div class="device-bottom">
+                <div class="device-power">Thiết bị còi</div>
+                <label class="switch">
+                  <input type="checkbox" id="alarmSwitch" />
+                  <span></span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div class="device-actions">
+            <button class="btn btn-primary" id="allOnBtn">Bật tất cả</button>
+            <button class="btn btn-secondary" id="allOffBtn">Tắt tất cả</button>
+          </div>
+        </article>
+      </section>
+    </section>
+  </main>
 
   <script src="app.js"></script>
 </body>
+
 </html>
