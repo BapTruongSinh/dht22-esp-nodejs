@@ -125,12 +125,6 @@ const updateBadge = (badgeId, isOn) => {
 const updateDevices = () => {
   updateBadge('fanBadge', fanSwitch.checked);
   updateBadge('alarmBadge', currentAlarmState);
-  
-  if (currentAlarmState) {
-    alarmOffBtn.classList.remove('hidden');
-  } else {
-    alarmOffBtn.classList.add('hidden');
-  }
 }
 
 // Điều khiển thiết bị
